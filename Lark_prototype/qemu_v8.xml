@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+        <remote name="github"   fetch="https://github.com" />
+	<remote name="tfo"      fetch="https://git.trustedfirmware.org" />
+        <remote name="u-boot"   fetch="https://source.denx.de/u-boot" />
+        <remote name="xen-git"  fetch="https://xenbits.xen.org/git-http" />
+        <default remote="github" revision="master" />
+
+        <!-- OP-TEE gits -->
+        <project path="optee_client"         name="OP-TEE/optee_client.git" revision="8b3f7fe3401f0853b4af32aed2c1b436f3a36377" />
+        <project path="optee_os"             name="OP-TEE/optee_os.git" revision="fc5e0894704fd0f42d80edbf2322d4938792d1db" />
+        <project path="optee_test"           name="OP-TEE/optee_test.git" revision="1cf0e6d2bdd1145370033d4e182634458528579d" />
+        <project path="build"                name="OP-TEE/build.git" revision="3412e52288a6b6a9ffa2324f59bb2a5d166fad46" >
+                <linkfile src="qemu_v8.mk" dest="build/Makefile" />
+        </project>
+
+        <!-- linaro-swg gits -->
+        <project path="linux"                name="linaro-swg/linux.git"                  revision="dbeb6ea978fc33bddcca50e416790dd590038961" clone-depth="1" />
+        <project path="optee_benchmark"      name="linaro-swg/optee_benchmark.git" revision="875be7f1959f19ed601ef37501f1cf0bfbee9da4" />
+        <project path="optee_examples"       name="linaro-swg/optee_examples.git" revision="65fc74309e12189ad5b6ce3ffec37c8011088a5a" />
+
+        <!-- Misc gits -->
+        <project path="buildroot"            name="buildroot/buildroot.git"               revision="refs/tags/2021.11" clone-depth="1" />
+        <project path="edk2"                 name="tianocore/edk2.git"                    revision="e1999b264f1f9d7230edf2448f757c73da567832" sync-s="true" />
+        <project path="mbedtls"              name="ARMmbed/mbedtls.git"                   revision="refs/tags/mbedtls-2.26.0" clone-depth="1" />
+        <project path="optee_rust"           name="apache/incubator-teaclave-trustzone-sdk.git"            revision="8520a2018705edcebfb7e729bd2ced12414fc052" />
+        <project path="qemu"                 name="qemu/qemu.git"                         revision="refs/tags/v6.0.0" clone-depth="1" />
+        <project path="trusted-firmware-a"   name="TF-A/trusted-firmware-a.git"           revision="refs/tags/v2.6" clone-depth="1" remote="tfo" />
+        <project path="u-boot"               name="u-boot.git"                            revision="refs/tags/v2021.04" remote="u-boot" clone-depth="1" />
+        <project path="xen"                  name="xen.git"                               revision="refs/tags/RELEASE-4.14.1" remote="xen-git" clone-depth="1" />
+</manifest>
