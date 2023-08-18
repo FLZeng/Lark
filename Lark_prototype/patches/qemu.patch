@@ -1,0 +1,134 @@
+diff --git a/hw/block/pflash_cfi01.c b/hw/block/pflash_cfi01.c
+index 81f9f97..c7404a0 100644
+--- a/hw/block/pflash_cfi01.c
++++ b/hw/block/pflash_cfi01.c
+@@ -496,9 +496,9 @@ static void pflash_write(PFlashCFI01 *pfl, hwaddr offset,
+         case 0xe8: /* Write to buffer */
+             trace_pflash_write(pfl->name, "write to buffer");
+             /* FIXME should save @offset, @width for case 1+ */
+-            qemu_log_mask(LOG_UNIMP,
+-                          "%s: Write to buffer emulation is flawed\n",
+-                          __func__);
++            //qemu_log_mask(LOG_UNIMP,
++            //              "%s: Write to buffer emulation is flawed\n",
++            //              __func__);
+             pfl->status |= 0x80; /* Ready! */
+             break;
+         case 0xf0: /* Probe for AMD flash */
+diff --git a/target/arm/helper.c b/target/arm/helper.c
+index d9220be..f6001f0 100644
+--- a/target/arm/helper.c
++++ b/target/arm/helper.c
+@@ -10357,6 +10357,23 @@ static inline int simple_ap_to_rw_prot_is_user(int ap, bool is_user)
+     }
+ }
+ 
++// MOD(ZFL): Translate PRN and PWN to page R/W protection flags.
++static inline int simple_rwn_to_rw_prot(int rwn)
++{
++    switch (rwn) {
++    case 0:
++	return PAGE_READ | PAGE_WRITE;
++    case 1:
++	return PAGE_WRITE;
++    case 2:
++	return PAGE_READ;
++    case 3:
++	return 0;
++    default:
++	g_assert_not_reached();
++    }
++}
++
+ static inline int
+ simple_ap_to_rw_prot(CPUARMState *env, ARMMMUIdx mmu_idx, int ap)
+ {
+@@ -10422,26 +10439,35 @@ static int get_S2prot(CPUARMState *env, int s2ap, int xn, bool s1_is_el0)
+  * @pxn:     PXN (privileged execute-never) bit
+  */
+ static int get_S1prot(CPUARMState *env, ARMMMUIdx mmu_idx, bool is_aa64,
+-                      int ap, int ns, int xn, int pxn)
++                      int ap, int ns, int xn, int pxn, int prwn, int urwn)
+ {
+     bool is_user = regime_is_user(env, mmu_idx);
+-    int prot_rw, user_rw;
++    int prot_rw, user_rw, prv_rw;
+     bool have_wxn;
+     int wxn = 0;
+ 
+     assert(mmu_idx != ARMMMUIdx_Stage2);
+     assert(mmu_idx != ARMMMUIdx_Stage2_S);
+ 
+-    user_rw = simple_ap_to_rw_prot_is_user(ap, true);
++    // MOD(ZFL): Use urwn to translate unprivilege access permissions
++    //user_rw = simple_ap_to_rw_prot_is_user(ap, true);
++    if (ns) {
++	user_rw = simple_ap_to_rw_prot_is_user(ap, true);
++    } else {
++        user_rw = simple_ap_to_rw_prot_is_user(ap, true) & simple_rwn_to_rw_prot(urwn);
++    }
++
+     if (is_user) {
+         prot_rw = user_rw;
+     } else {
+-        if (user_rw && regime_is_pan(env, mmu_idx)) {
+-            /* PAN forbids data accesses but doesn't affect insn fetch */
+-            prot_rw = 0;
+-        } else {
+-            prot_rw = simple_ap_to_rw_prot_is_user(ap, false);
+-        }
++	// MOD(ZFL): Use prwn to translate privilege access permissions
++        //if (user_rw && regime_is_pan(env, mmu_idx)) {
++        //    /* PAN forbids data accesses but doesn't affect insn fetch */
++        //    prot_rw = 0;
++        //} else {
++        //    prot_rw = simple_ap_to_rw_prot_is_user(ap, false);
++        //}
++	prot_rw = simple_ap_to_rw_prot_is_user(ap, false) & simple_rwn_to_rw_prot(prwn);
+     }
+ 
+     if (ns && arm_is_secure(env) && (env->cp15.scr_el3 & SCR_SIF)) {
+@@ -11211,11 +11237,11 @@ static bool get_phys_addr_lpae(CPUARMState *env, uint64_t address,
+     hwaddr descaddr, indexmask, indexmask_grainsize;
+     uint32_t tableattrs;
+     target_ulong page_size;
+-    uint32_t attrs;
++    uint32_t attrs, attrs2;			// MOD(ZFL): Add attrs2
+     int32_t stride;
+     int addrsize, inputsize;
+     TCR *tcr = regime_tcr(env, mmu_idx);
+-    int ap, ns, xn, pxn;
++    int ap, ns, xn, pxn, prwn, urwn;		// MOD(ZFL): Add prwn and urwn
+     uint32_t el = regime_el(env, mmu_idx);
+     uint64_t descaddrmask;
+     bool aarch64 = arm_el_is_aa64(env, el);
+@@ -11389,6 +11415,8 @@ static bool get_phys_addr_lpae(CPUARMState *env, uint64_t address,
+         /* Extract attributes from the descriptor */
+         attrs = extract64(descriptor, 2, 10)
+             | (extract64(descriptor, 52, 12) << 10);
++	// MOD(ZFL): Extract PRN and PWN from the descriptor
++	attrs2 = extract64(descriptor, 48, 2);
+ 
+         if (mmu_idx == ARMMMUIdx_Stage2 || mmu_idx == ARMMMUIdx_Stage2_S) {
+             /* Stage 2 table descriptors do not include any attribute fields */
+@@ -11419,6 +11447,10 @@ static bool get_phys_addr_lpae(CPUARMState *env, uint64_t address,
+     }
+ 
+     ap = extract32(attrs, 4, 2);
++    // MOD(ZFL): Extract URN and UWN
++    urwn = extract32(attrs, 13, 2);
++    // MOD(ZFL): Extract PRN and PWN
++    prwn = extract32(attrs2, 0, 2);
+ 
+     if (mmu_idx == ARMMMUIdx_Stage2 || mmu_idx == ARMMMUIdx_Stage2_S) {
+         ns = mmu_idx == ARMMMUIdx_Stage2;
+@@ -11428,7 +11460,8 @@ static bool get_phys_addr_lpae(CPUARMState *env, uint64_t address,
+         ns = extract32(attrs, 3, 1);
+         xn = extract32(attrs, 12, 1);
+         pxn = extract32(attrs, 11, 1);
+-        *prot = get_S1prot(env, mmu_idx, aarch64, ap, ns, xn, pxn);
++	// MOD(ZFL): Pass prwn to get_S1prot
++        *prot = get_S1prot(env, mmu_idx, aarch64, ap, ns, xn, pxn, prwn, urwn);
+     }
+ 
+     fault_type = ARMFault_Permission;

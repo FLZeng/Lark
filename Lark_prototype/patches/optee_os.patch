@@ -1,0 +1,1020 @@
+diff --git a/core/arch/arm/kernel/thread_optee_smc.c b/core/arch/arm/kernel/thread_optee_smc.c
+index be0287d7..4fe177d4 100644
+--- a/core/arch/arm/kernel/thread_optee_smc.c
++++ b/core/arch/arm/kernel/thread_optee_smc.c
+@@ -554,7 +554,7 @@ static struct mobj *get_rpc_alloc_res(struct optee_msg_arg *arg,
+ 	if (arg->params[0].attr == OPTEE_MSG_ATTR_TYPE_TMEM_OUTPUT)
+ 		mobj = rpc_shm_mobj_alloc(p, sz, cookie);
+ 	else
+-		mobj = msg_param_mobj_from_noncontig(p, sz, cookie, true);
++		mobj = msg_param_mobj_from_noncontig(p, sz, cookie, 3, 0, true);
+ 
+ 	if (!mobj) {
+ 		thread_rpc_free(bt, cookie, mobj);
+diff --git a/core/arch/arm/mm/core_mmu_lpae.c b/core/arch/arm/mm/core_mmu_lpae.c
+index ce1bca08..433c8c3a 100644
+--- a/core/arch/arm/mm/core_mmu_lpae.c
++++ b/core/arch/arm/mm/core_mmu_lpae.c
+@@ -78,7 +78,7 @@
+ #include <util.h>
+ 
+ #ifndef DEBUG_XLAT_TABLE
+-#define DEBUG_XLAT_TABLE 0
++#define DEBUG_XLAT_TABLE 1
+ #endif
+ 
+ #if DEBUG_XLAT_TABLE
+@@ -98,6 +98,13 @@
+ #define TABLE_DESC		0x3
+ #define DESC_ENTRY_TYPE_MASK	0x3
+ 
++// MOD(ZFL): Add RES0_ATTRS
++#define RES0_ATTRS(x)		(((x) & 0xf) << 48)
++#define UWN			(1ull << 8)
++#define URN			(1ull << 7)
++#define PWN			(1ull << 1)
++#define PRN			(1ull << 0)
++
+ #define XN			(1ull << 2)
+ #define PXN			(1ull << 1)
+ #define CONT_HINT		(1ull << 0)
+@@ -323,12 +330,31 @@ static uint32_t desc_to_mattr(unsigned level, uint64_t desc)
+ 	if (!(desc & LOWER_ATTRS(AP_UNPRIV)))
+ 		a &= ~TEE_MATTR_URWX;
+ 
++	// MOD(ZFL): Parse URN
++	if ((desc & RES0_ATTRS(URN)) && !(desc & LOWER_ATTRS(NS)))
++		a &= ~TEE_MATTR_UR;
++
++	// MOD(ZFL): Parse UWN
++	if ((desc & RES0_ATTRS(UWN)) && !(desc & LOWER_ATTRS(NS)))
++		a &= ~TEE_MATTR_UW;
++
++	// MOD(ZFL): XN only control unprivileged permission
++	//if (desc & UPPER_ATTRS(XN))
++	//	a &= ~(TEE_MATTR_PX | TEE_MATTR_UX);
+ 	if (desc & UPPER_ATTRS(XN))
+-		a &= ~(TEE_MATTR_PX | TEE_MATTR_UX);
++		a &= ~TEE_MATTR_UX;
+ 
+ 	if (desc & UPPER_ATTRS(PXN))
+ 		a &= ~TEE_MATTR_PX;
+ 
++	// MOD(ZFL): Parse PRN
++	if (desc & RES0_ATTRS(PRN))
++		a &= ~TEE_MATTR_PR;
++
++	// MOD(ZFL): Parse PWN
++	if (desc & RES0_ATTRS(PWN))
++		a &= ~TEE_MATTR_PW;
++
+ 	COMPILE_TIME_ASSERT(ATTR_DEVICE_INDEX == TEE_MATTR_CACHE_NONCACHE);
+ 	COMPILE_TIME_ASSERT(ATTR_IWBWA_OWBWA_NTR_INDEX ==
+ 			    TEE_MATTR_CACHE_CACHED);
+@@ -359,14 +385,17 @@ static uint64_t mattr_to_desc(unsigned level, uint32_t attr)
+ 	if (!(a & TEE_MATTR_VALID_BLOCK))
+ 		return 0;
+ 
+-	if (a & (TEE_MATTR_PX | TEE_MATTR_PW))
+-		a |= TEE_MATTR_PR;
+-	if (a & (TEE_MATTR_UX | TEE_MATTR_UW))
+-		a |= TEE_MATTR_UR;
+-	if (a & TEE_MATTR_UR)
+-		a |= TEE_MATTR_PR;
+-	if (a & TEE_MATTR_UW)
+-		a |= TEE_MATTR_PW;
++	//if (a & (TEE_MATTR_PX | TEE_MATTR_PW))
++	//	a |= TEE_MATTR_PR;
++	//if (a & (TEE_MATTR_UX | TEE_MATTR_UW))
++	//	a |= TEE_MATTR_UR;
++
++	// MOD(ZFL): Do not grant read or write permissions
++	// to privileged entity automatically
++	//if (a & TEE_MATTR_UR)
++	//	a |= TEE_MATTR_PR;
++	//if (a & TEE_MATTR_UW)
++	//	a |= TEE_MATTR_PW;
+ 
+ 	if (IS_ENABLED(CFG_CORE_BTI) && (a & TEE_MATTR_PX))
+ 		a |= TEE_MATTR_GUARDED;
+@@ -376,7 +405,9 @@ static uint64_t mattr_to_desc(unsigned level, uint32_t attr)
+ 	else
+ 		desc = BLOCK_DESC;
+ 
+-	if (!(a & (TEE_MATTR_PX | TEE_MATTR_UX)))
++	// MOD(ZFL): XN only control unprivileged permission
++	//if (!(a & (TEE_MATTR_PX | TEE_MATTR_UX)))
++	if (!(a & TEE_MATTR_UX))
+ 		desc |= UPPER_ATTRS(XN);
+ 	if (!(a & TEE_MATTR_PX))
+ 		desc |= UPPER_ATTRS(PXN);
+@@ -390,6 +421,22 @@ static uint64_t mattr_to_desc(unsigned level, uint32_t attr)
+ 	if (feat_bti_is_implemented() && (a & TEE_MATTR_GUARDED))
+ 		desc |= GP;
+ 
++	// MOD(ZFL): Convert ~TEE_MATTR_UR to URN
++        if ((a & TEE_MATTR_SECURE) && !(a & TEE_MATTR_UR))
++                desc |= RES0_ATTRS(URN);
++
++        // MOD(ZFL): Convert ~TEE_MATTR_UW to UWN
++        if ((a & TEE_MATTR_SECURE) && !(a & TEE_MATTR_UW))
++                desc |= RES0_ATTRS(UWN);
++
++	// MOD(ZFL): Convert ~TEE_MATTR_PR to PRN
++	if (!(a & TEE_MATTR_PR))
++		desc |= RES0_ATTRS(PRN);
++
++	// MOD(ZFL): Convert ~TEE_MATTR_PW to PWN
++	if (!(a & TEE_MATTR_PW))
++		desc |= RES0_ATTRS(PWN);
++
+ 	/* Keep in sync with core_mmu.c:core_mmu_mattr_is_ok */
+ 	switch ((a >> TEE_MATTR_CACHE_SHIFT) & TEE_MATTR_CACHE_MASK) {
+ 	case TEE_MATTR_CACHE_NONCACHE:
+@@ -406,7 +453,7 @@ static uint64_t mattr_to_desc(unsigned level, uint32_t attr)
+ 		panic();
+ 	}
+ 
+-	if (a & (TEE_MATTR_UR | TEE_MATTR_PR))
++	if (a & (TEE_MATTR_UR | TEE_MATTR_UW | TEE_MATTR_PR | TEE_MATTR_PW))
+ 		desc |= LOWER_ATTRS(ACCESS_FLAG);
+ 
+ 	if (!(a & TEE_MATTR_GLOBAL))
+@@ -597,8 +644,10 @@ static void core_init_mmu_prtn_tee(struct mmu_partition *prtn,
+ 
+ 	assert(prtn && mm);
+ 
++	DMSG("\n\n\nZFL: core_init_mmu_prtn_tee\n\n\n");
++
+ 	for (n = 0; !core_mmap_is_end_of_table(mm + n); n++) {
+-		debug_print(" %010" PRIxVA " %010" PRIxPA " %10zx %x",
++		debug_print("ZFL: " " %010" PRIxVA " %010" PRIxPA " %10zx %x",
+ 			    mm[n].va, mm[n].pa, mm[n].size, mm[n].attr);
+ 
+ 		if (!IS_PAGE_ALIGNED(mm[n].pa) || !IS_PAGE_ALIGNED(mm[n].size))
+diff --git a/core/arch/arm/tee/arch_svc.c b/core/arch/arm/tee/arch_svc.c
+index 6aff8022..b5ea78d7 100644
+--- a/core/arch/arm/tee/arch_svc.c
++++ b/core/arch/arm/tee/arch_svc.c
+@@ -24,6 +24,7 @@
+ #include <tee/tee_svc_cryp.h>
+ #include <tee/tee_svc.h>
+ #include <tee/tee_svc_storage.h>
++#include <tee/tee_pac.h>	// MOD(ZFL): Add PAC syscalls
+ #include <trace.h>
+ #include <util.h>
+ 
+@@ -121,6 +122,11 @@ static const struct syscall_entry tee_svc_syscall_table[] = {
+ 	SYSCALL_ENTRY(syscall_not_supported),
+ 	SYSCALL_ENTRY(syscall_not_supported),
+ 	SYSCALL_ENTRY(syscall_cache_operation),
++        // MOD(yucy): Add set access rights
++        SYSCALL_ENTRY(syscall_set_access_rights),
++        // MOD(ZFL): Add PAC syscalls
++        SYSCALL_ENTRY(syscall_pac_service_write),
++        SYSCALL_ENTRY(syscall_pac_service_read),
+ };
+ 
+ /*
+diff --git a/core/core.mk b/core/core.mk
+index c4c070ee..ba767d1f 100644
+--- a/core/core.mk
++++ b/core/core.mk
+@@ -62,6 +62,8 @@ endif
+ 
+ cppflags$(sm)	+= -Ildelf/include
+ cppflags$(sm)	+= -Ilib/libutee/include
++# MOD(ZFL): Add libpac
++cppflags$(sm)	+= -Ilib/libpac/include
+ 
+ ifeq ($(filter y, $(CFG_CORE_DYN_SHM) $(CFG_CORE_RESERVED_SHM)),)
+ $(error error: No shared memory configured)
+diff --git a/core/drivers/driver_pac.c b/core/drivers/driver_pac.c
+new file mode 100644
+index 00000000..ebc04ecf
+--- /dev/null
++++ b/core/drivers/driver_pac.c
+@@ -0,0 +1,48 @@
++#define MOUDLE_PAC_DRIVER_C_
++
++#include <assert.h>
++#include <stdlib.h>
++#include <string.h>
++#include <utee_defines.h>
++#include <trace.h>
++#include <tee_api_types.h>
++#include <string_ext.h>
++#include <util.h>
++#include <kernel/panic.h>
++#include <kernel/thread.h>
++#include <kernel/thread_spmc.h>
++#include <tee/tee_svc.h>
++#include <trace.h>
++
++
++uint8_t g_buffer[64] = {0};
++
++TEE_Result pac_device_init(void)
++{
++    IMSG("[PAC_Driver] PAC device init");
++    memset(g_buffer, 0, 64);
++    return TEE_SUCCESS;
++}
++
++TEE_Result pac_device_write(uint8_t *buf, size_t len)
++{
++    IMSG("[PAC_Driver] PAC device write entry, buf addr: %p", buf);
++
++    memset(g_buffer, 0, 64);
++    memcpy(g_buffer, buf, len);
++
++    IMSG("[PAC_Driver] PAC device write exit");
++
++    return TEE_SUCCESS;
++}
++
++TEE_Result pac_device_read(uint8_t *buf, size_t len)
++{
++    IMSG("[PAC_Driver] PAC device read entry, buf addr: %p", buf);
++
++    memcpy(buf, g_buffer, len);
++
++    IMSG("[PAC_Driver] PAC device read exit");
++
++    return TEE_SUCCESS;
++}
+diff --git a/core/drivers/sub.mk b/core/drivers/sub.mk
+index c5bd4c6b..9e274907 100644
+--- a/core/drivers/sub.mk
++++ b/core/drivers/sub.mk
+@@ -57,3 +57,6 @@ subdirs-$(CFG_SCMI_MSG_DRIVERS) += scmi-msg
+ subdirs-y += imx
+ subdirs-y += pm
+ subdirs-y += wdt
++
++# MOD(ZFL): Add driver_pac.c
++srcs-y += driver_pac.c
+diff --git a/core/include/drivers/driver_pac.h b/core/include/drivers/driver_pac.h
+new file mode 100644
+index 00000000..2931d7b7
+--- /dev/null
++++ b/core/include/drivers/driver_pac.h
+@@ -0,0 +1,27 @@
++#ifndef MOUDLE_PAC_DRIVER_H_
++#define MOUDLE_PAC_DRIVER_H_
++
++#include <assert.h>
++#include <stdlib.h>
++#include <string.h>
++#include <utee_defines.h>
++#include <trace.h>
++#include <tee_api_types.h>
++#include <string_ext.h>
++#include <util.h>
++#include <kernel/panic.h>
++
++struct pac_driver_ops_s {
++    TEE_Result (*device_init)(void);
++    TEE_Result (*device_write)(uint8_t *buf, size_t len);
++    TEE_Result (*device_read)(uint8_t *buf, size_t len);
++};
++
++
++
++TEE_Result pac_device_init(void);
++TEE_Result pac_device_write(uint8_t *buf, size_t len);
++TEE_Result pac_device_read(uint8_t *buf, size_t len);
++
++
++#endif  /* MOUDLE_PAC_DRIVER_H_*/
+diff --git a/core/include/kernel/msg_param.h b/core/include/kernel/msg_param.h
+index 841c3bfa..ebcad957 100644
+--- a/core/include/kernel/msg_param.h
++++ b/core/include/kernel/msg_param.h
+@@ -50,7 +50,8 @@
+  */
+ #ifdef CFG_CORE_DYN_SHM
+ struct mobj *msg_param_mobj_from_noncontig(paddr_t buf_ptr, size_t size,
+-					   uint64_t shm_ref, bool map_buffer);
++					   uint64_t shm_ref, uint32_t prot,
++					   uint32_t prot_is_set, bool map_buffer);
+ #else
+ static inline struct mobj *
+ msg_param_mobj_from_noncontig(paddr_t buf_ptr __unused, size_t size __unused,
+diff --git a/core/include/mm/mobj.h b/core/include/mm/mobj.h
+index aa3e100f..ec2d8f84 100644
+--- a/core/include/mm/mobj.h
++++ b/core/include/mm/mobj.h
+@@ -22,6 +22,9 @@ struct mobj {
+ 	size_t size;
+ 	size_t phys_granule;
+ 	struct refcount refc;
++	// MOD(yucy): add prot
++	uint32_t prot;
++	uint32_t prot_is_set;
+ };
+ 
+ struct mobj_ops {
+diff --git a/core/include/mm/vm.h b/core/include/mm/vm.h
+index a042a4e0..3aab17f8 100644
+--- a/core/include/mm/vm.h
++++ b/core/include/mm/vm.h
+@@ -9,6 +9,9 @@
+ #include <kernel/tee_ta_manager.h>
+ #include <kernel/user_ta.h>
+ 
++#define PROT_READ       0x1
++#define PROT_WRITE      0x2
++
+ /* Allocate context resources like ASID and MMU table information */
+ TEE_Result vm_info_init(struct user_mode_ctx *uctx);
+ 
+diff --git a/core/include/optee_msg.h b/core/include/optee_msg.h
+index 7cc795d7..f19db005 100644
+--- a/core/include/optee_msg.h
++++ b/core/include/optee_msg.h
+@@ -116,6 +116,9 @@ struct optee_msg_param_tmem {
+ 	uint64_t buf_ptr;
+ 	uint64_t size;
+ 	uint64_t shm_ref;
++	// MOD(yucy): add prot
++	uint32_t prot;
++	uint32_t prot_is_set;
+ };
+ 
+ /**
+diff --git a/core/include/tee/tee_pac.h b/core/include/tee/tee_pac.h
+new file mode 100644
+index 00000000..851a70b4
+--- /dev/null
++++ b/core/include/tee/tee_pac.h
+@@ -0,0 +1,9 @@
++#include <drivers/driver_pac.h>
++
++struct pac_service_ops {
++    const char* name;
++    struct pac_driver_ops_s pac_driver;
++};
++
++TEE_Result syscall_pac_service_write(void *buf, size_t len);
++TEE_Result syscall_pac_service_read(void *buf, size_t len);
+diff --git a/core/include/tee/tee_svc.h b/core/include/tee/tee_svc.h
+index 27a04c05..a1cdae88 100644
+--- a/core/include/tee/tee_svc.h
++++ b/core/include/tee/tee_svc.h
+@@ -60,6 +60,9 @@ TEE_Result syscall_invoke_ta_command(unsigned long sess,
+ 			unsigned long cancel_req_to, unsigned long cmd_id,
+ 			struct utee_params *params, uint32_t *ret_orig);
+ 
++// MOD(yucy): add set access rights
++TEE_Result syscall_set_access_rights(unsigned long flags, const void *buf, size_t len);
++
+ TEE_Result syscall_check_access_rights(unsigned long flags, const void *buf,
+ 				       size_t len);
+ 
+diff --git a/core/kernel/msg_param.c b/core/kernel/msg_param.c
+index 5b7fec80..60aa656d 100644
+--- a/core/kernel/msg_param.c
++++ b/core/kernel/msg_param.c
+@@ -113,7 +113,8 @@ out:
+ }
+ 
+ struct mobj *msg_param_mobj_from_noncontig(paddr_t buf_ptr, size_t size,
+-					   uint64_t shm_ref, bool map_buffer)
++					   uint64_t shm_ref, uint32_t prot,
++					   uint32_t prot_is_set, bool map_buffer)
+ {
+ 	struct mobj *mobj = NULL;
+ 	paddr_t *pages = NULL;
+@@ -143,6 +144,9 @@ struct mobj *msg_param_mobj_from_noncontig(paddr_t buf_ptr, size_t size,
+ 	else
+ 		mobj = mobj_reg_shm_alloc(pages, num_pages, page_offset,
+ 					  shm_ref);
++	// MOD(yucy): set shm prot and prot_is_set
++	mobj->prot = prot;
++	mobj->prot_is_set = prot_is_set;
+ out:
+ 	free(pages);
+ 	return mobj;
+diff --git a/core/mm/vm.c b/core/mm/vm.c
+index a14bc801..660c4312 100644
+--- a/core/mm/vm.c
++++ b/core/mm/vm.c
+@@ -985,10 +985,34 @@ TEE_Result vm_map_param(struct user_mode_ctx *uctx, struct tee_ta_param *param,
+ 	check_param_map_empty(uctx);
+ 
+ 	for (n = 0; n < m; n++) {
++		// MOD(yucy): change vm_map attr
+ 		vaddr_t va = 0;
++		uint32_t mattr = TEE_MATTR_PRW | TEE_MATTR_URW;
++
++		if (mem[n].mobj->prot_is_set) {
++			switch (mem[n].mobj->prot) {
++			case 0:
++				mattr = TEE_MATTR_URW;
++				break;
++			case 1:
++				mattr = TEE_MATTR_PR | TEE_MATTR_URW;
++				break;
++			case 2:
++				mattr = TEE_MATTR_PW | TEE_MATTR_URW;
++				break;
++			case 3:
++				mattr = TEE_MATTR_PRW | TEE_MATTR_URW;
++				break;
++			default:
++				mattr = TEE_MATTR_PRW | TEE_MATTR_URW;
++			}
++		}
+ 
+-		res = vm_map(uctx, &va, mem[n].size,
+-			     TEE_MATTR_PRW | TEE_MATTR_URW,
++		//res = vm_map(uctx, &va, mem[n].size,
++		//	     TEE_MATTR_PRW | TEE_MATTR_URW,
++		//	     VM_FLAG_EPHEMERAL | VM_FLAG_SHAREABLE,
++		//	     mem[n].mobj, mem[n].offs);
++		res = vm_map(uctx, &va, mem[n].size, mattr,
+ 			     VM_FLAG_EPHEMERAL | VM_FLAG_SHAREABLE,
+ 			     mem[n].mobj, mem[n].offs);
+ 		if (res)
+diff --git a/core/pta/pac.c b/core/pta/pac.c
+new file mode 100644
+index 00000000..f40acfc5
+--- /dev/null
++++ b/core/pta/pac.c
+@@ -0,0 +1,109 @@
++#include <bench.h>
++#include <compiler.h>
++#include <kernel/misc.h>
++#include <kernel/mutex.h>
++#include <kernel/pseudo_ta.h>
++#include <malloc.h>
++#include <mm/core_memprot.h>
++#include <mm/mobj.h>
++#include <mm/tee_mm.h>
++#include <mm/tee_pager.h>
++#include <mm/vm.h>
++#include <optee_rpc_cmd.h>
++#include <pta_pac.h>
++#include <stdio.h>
++#include <string_ext.h>
++#include <string.h>
++#include <trace.h>
++
++uint8_t g_pac_buffer[64] = {0};
++
++static TEE_Result create_ta(void)
++{
++	IMSG("[PTA_PAC] PTA_PAC has been created");
++	return TEE_SUCCESS;
++}
++
++static void destroy_ta(void)
++{
++	IMSG("[PTA_PAC] PTA_PAC has been destroyed");
++}
++
++static TEE_Result open_session(uint32_t nParamTypes __unused,
++		TEE_Param pParams[TEE_NUM_PARAMS] __unused,
++		void **ppSessionContext __unused)
++{
++	IMSG("[PTA_PAC] PTA_PAC has been opened");
++
++	return TEE_SUCCESS;
++}
++
++static void close_session(void *pSessionContext __unused)
++{
++	IMSG("[PTA_PAC] PTA_PAC has been closed");
++}
++
++static TEE_Result pac_read(uint8_t* buffer, uint32_t size)
++{
++	TEE_Result ret = TEE_SUCCESS;
++
++	IMSG("[PTA_PAC] pac_read has been called, buf addr: %p", buffer);
++	memcpy(buffer, g_pac_buffer, size);
++	IMSG("[PTA_PAC] pac_read exit");
++
++	return ret;
++}
++
++static TEE_Result pac_write(uint8_t* buffer, uint32_t size)
++{
++	TEE_Result ret = TEE_SUCCESS;
++
++	IMSG("[PTA_PAC] pac_write has been called, buf addr: %p", buffer);
++	memset(g_pac_buffer, 0, 64);
++	memcpy(g_pac_buffer, buffer, size);
++	IMSG("[PTA_PAC] pac_write exit");
++
++	return ret;
++}
++
++static TEE_Result invoke_command(void *session_ctx __unused,
++		uint32_t cmd_id, uint32_t param_types,
++		TEE_Param params[TEE_NUM_PARAMS])
++{
++	IMSG("[PTA_PAC] invoke_command has been called");
++
++	//check input param whether is invalid
++	if (param_types != TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INOUT,
++                                       TEE_PARAM_TYPE_NONE,
++                                       TEE_PARAM_TYPE_NONE,
++                                       TEE_PARAM_TYPE_NONE))
++    {
++        FMSG("[PTA_PAC] invoke_command invalid params \"%s\"", TA_NAME);
++        return TEE_ERROR_BAD_PARAMETERS;
++    }
++
++	//get input data buffer and size
++	uint8_t* buffer = params[0].memref.buffer;
++	uint32_t size = params[0].memref.size;
++
++	switch (cmd_id) {
++	case PTA_PAC_CMD_READ:
++		return pac_read(buffer, size);
++	case PTA_PAC_CMD_WRITE:
++		return pac_write(buffer, size);
++	default:
++		break;
++	}
++
++	IMSG("[PTA_PAC] invoke_command bad exit");
++
++	return TEE_ERROR_BAD_PARAMETERS;
++}
++
++pseudo_ta_register(.uuid = PTA_PAC_UUID, .name = TA_NAME,
++		   .flags = PTA_DEFAULT_FLAGS | TA_FLAG_SECURE_DATA_PATH | TA_FLAG_CONCURRENT,
++		   .create_entry_point = create_ta,
++		   .destroy_entry_point = destroy_ta,
++		   .open_session_entry_point = open_session,
++		   .close_session_entry_point = close_session,
++		   .invoke_command_entry_point = invoke_command);
+diff --git a/core/pta/sub.mk b/core/pta/sub.mk
+index 60e74753..a3655e30 100644
+--- a/core/pta/sub.mk
++++ b/core/pta/sub.mk
+@@ -14,3 +14,5 @@ srcs-$(CFG_SCMI_PTA) += scmi.c
+ srcs-$(CFG_HWRNG_PTA) += hwrng.c
+ 
+ subdirs-y += bcm
++
++srcs-y += pac.c
+diff --git a/core/tee/entry_std.c b/core/tee/entry_std.c
+index 5f44521d..a862904f 100644
+--- a/core/tee/entry_std.c
++++ b/core/tee/entry_std.c
+@@ -116,7 +116,7 @@ static TEE_Result set_tmem_param(const struct optee_msg_param_tmem *tmem,
+ 	if (attr & OPTEE_MSG_ATTR_NONCONTIG) {
+ 		uint64_t shm_ref = READ_ONCE(tmem->shm_ref);
+ 
+-		mem->mobj = msg_param_mobj_from_noncontig(pa, sz, shm_ref,
++		mem->mobj = msg_param_mobj_from_noncontig(pa, sz, shm_ref, 3, 0,
+ 							  false);
+ 		if (!mem->mobj)
+ 			return TEE_ERROR_BAD_PARAMETERS;
+@@ -493,8 +493,12 @@ static void register_shm(struct optee_msg_arg *arg, uint32_t num_params)
+ 		return;
+ 
+ 	tmem = &arg->params[0].u.tmem;
++	// MOD(yucy): set shm prot and prot_is_set
++	//mobj = msg_param_mobj_from_noncontig(tmem->buf_ptr, tmem->size,
++	//				     tmem->shm_ref, false);
+ 	mobj = msg_param_mobj_from_noncontig(tmem->buf_ptr, tmem->size,
+-					     tmem->shm_ref, false);
++					     tmem->shm_ref, tmem->prot,
++					     tmem->prot_is_set, false);
+ 
+ 	if (!mobj)
+ 		return;
+diff --git a/core/tee/sub.mk b/core/tee/sub.mk
+index 6847e066..aa95ce20 100644
+--- a/core/tee/sub.mk
++++ b/core/tee/sub.mk
+@@ -28,6 +28,8 @@ srcs-y += tee_obj.c
+ srcs-y += tee_svc.c
+ srcs-y += tee_svc_cryp.c
+ srcs-y += tee_svc_storage.c
++# MOD(ZFL): Add tee_pac.c
++srcs-y += tee_pac.c
+ cppflags-tee_svc.c-y += -DTEE_IMPL_VERSION=$(TEE_IMPL_VERSION)
+ srcs-y += tee_time_generic.c
+ srcs-$(CFG_SECSTOR_TA) += tadb.c
+diff --git a/core/tee/tee_pac.c b/core/tee/tee_pac.c
+new file mode 100644
+index 00000000..917180e4
+--- /dev/null
++++ b/core/tee/tee_pac.c
+@@ -0,0 +1,67 @@
++#include <drivers/driver_pac.h>
++#include <tee/tee_pac.h>
++#include <tee/tee_svc.h>
++#include <trace.h>
++
++struct pac_service_ops pac_ops = {
++    .name = "PAC_Driver",
++    .pac_driver = {
++        .device_init = pac_device_init,
++        .device_write = pac_device_write,
++        .device_read = pac_device_read,
++    },
++};
++
++
++TEE_Result syscall_pac_service_write(void *buf, size_t len)
++{
++    uint8_t* src = NULL;
++
++    IMSG("[PAC_Service] syscall_pac_service_write entry， buf addr: %p", buf);
++
++    // src = malloc(len);
++    // memcpy(src, buf, len);
++    // pac_ops.pac_driver.device_write(src, len);
++    // free(src);
++
++    pac_ops.pac_driver.device_write(buf, len);
++
++    IMSG("[PAC_Service] syscall_pac_service_write exit");
++
++    return TEE_SUCCESS;
++}
++
++
++TEE_Result syscall_pac_service_read(void *buf, size_t len)
++{
++    uint8_t* dst = NULL;
++
++    IMSG("[PAC_Service] syscall_pac_service_read entry， buf addr: %p", buf);
++
++    // dst = malloc(len);
++    // pac_ops.pac_driver.device_read(dst, len);
++    // memcpy(buf, dst, len);
++    // free(dst);
++
++    pac_ops.pac_driver.device_read(buf, len);
++
++    IMSG("[PAC_Service] syscall_pac_service_read exit");
++
++    return TEE_SUCCESS;
++
++}
++
++
++static TEE_Result tee_pac_init(void)
++{
++    IMSG("[PAC_Service] Strat to start PAC servie");
++
++    if (pac_ops.pac_driver.device_init)
++        pac_ops.pac_driver.device_init();
++
++    IMSG("[PAC_Service] PAC servcie initial done");
++
++    return TEE_SUCCESS;
++}
++
++service_init(tee_pac_init);
+diff --git a/core/tee/tee_svc.c b/core/tee/tee_svc.c
+index 362bdee7..ff16dbdd 100644
+--- a/core/tee/tee_svc.c
++++ b/core/tee/tee_svc.c
+@@ -948,6 +948,17 @@ function_exit:
+ 	return res;
+ }
+ 
++// MOD(yucy): add set access rights
++TEE_Result syscall_set_access_rights(unsigned long flags, const void *buf,
++				     size_t len)
++{
++	struct ts_session *s = ts_get_current_session();
++	FMSG("Come to syscall_set_access_rights");
++	return vm_set_prot(&to_user_ta_ctx(s->ctx)->uctx,
++				      (vaddr_t)buf, len, flags);
++}
++
++
+ TEE_Result syscall_check_access_rights(unsigned long flags, const void *buf,
+ 				       size_t len)
+ {
+diff --git a/lib/libpac/include/libpac.h b/lib/libpac/include/libpac.h
+new file mode 100644
+index 00000000..3d6e803e
+--- /dev/null
++++ b/lib/libpac/include/libpac.h
+@@ -0,0 +1,12 @@
++#ifndef _LIB_PAC_H_
++#define _LIB_PAC_H_
++
++#include <tee_internal_api.h>
++
++#include <pta_pac.h>
++
++TEE_Result PAC_Write(uint8_t* data, uint32_t size);
++
++TEE_Result PAC_Read(uint8_t* data, uint32_t size);
++
++#endif /* _LIB_PAC_H_ */
+diff --git a/lib/libpac/include/pta_pac.h b/lib/libpac/include/pta_pac.h
+new file mode 100644
+index 00000000..34555055
+--- /dev/null
++++ b/lib/libpac/include/pta_pac.h
+@@ -0,0 +1,21 @@
++#ifndef __PTA_PAC_H
++#define __PTA_PAC_H
++
++/*
++ * Interface to the pac pseudo-TA, which is used for handling
++ * device root of trust function
++ */
++//c7cf25d5-b62a-40bc-8841-2cefabbbf5bb
++#define PTA_PAC_UUID \
++		{ 0xc7cf25d5, 0xb62a, 0x40bc, \
++		{ 0x88, 0x41, 0x2c, 0xef, 0xab, 0xbb, 0xf5, 0xbb } }
++
++#define TA_NAME		"pac.pta"
++
++/*
++ * PAC PTA supported commands
++ */
++#define PTA_PAC_CMD_READ		0
++#define PTA_PAC_CMD_WRITE		1
++
++#endif /* __PTA_PAC_H */
+diff --git a/lib/libpac/libpac.c b/lib/libpac/libpac.c
+new file mode 100644
+index 00000000..50f74794
+--- /dev/null
++++ b/lib/libpac/libpac.c
+@@ -0,0 +1,81 @@
++/*
++* device root of trust handler
++*/
++
++#include <string.h>
++#include <tee_internal_api_extensions.h>
++
++#include "libpac.h"
++
++static TEE_Result invoke_pta_pac(uint32_t cmd_id, uint8_t* data, uint32_t size)
++{
++    IMSG("[libpac] Invoke PTA_PAC to handle requested command");
++
++    // Dispatch to PTA
++    TEE_Result res = TEE_ERROR_GENERIC;
++    TEE_UUID uuid = PTA_PAC_UUID;
++    TEE_TASessionHandle session = TEE_HANDLE_NULL;
++    uint32_t ret_orig = 0;
++    TEE_Param params[TEE_NUM_PARAMS];
++    uint32_t param_types = 0;
++
++    //open session
++    res = TEE_OpenTASession(&uuid, TEE_TIMEOUT_INFINITE,
++                            0, params, &session, &ret_orig);
++    if (res != TEE_SUCCESS) {
++        EMSG("[libpac] open pta session failed, res 0x%08x, origin 0x%08x",
++             res, ret_orig);
++        return res;
++    }
++
++    //invoke command
++    param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INOUT,
++                                  TEE_PARAM_TYPE_NONE,
++                                  TEE_PARAM_TYPE_NONE,
++                                  TEE_PARAM_TYPE_NONE);
++    // data & size
++    params[0].memref.buffer = data;
++    params[0].memref.size = size;
++
++    IMSG("[libpac] TEE_InvokeTACommand start");
++    res = TEE_InvokeTACommand(session, TEE_TIMEOUT_INFINITE, cmd_id,
++                              param_types, params, NULL);
++    if (res != TEE_SUCCESS) {
++        EMSG("[libpac] Invoke command to pta failed, res 0x%08x, origin 0x%08x.",
++             res, ret_orig);
++        TEE_CloseTASession(session);
++        session = TEE_HANDLE_NULL;
++        return res;
++    }
++
++    //close session
++    TEE_CloseTASession(session);
++    session = TEE_HANDLE_NULL;
++    return res;
++}
++
++TEE_Result PAC_Write(uint8_t* data, uint32_t size)
++{
++    TEE_Result res = TEE_ERROR_GENERIC;
++
++    IMSG("[libpac] PAC_Write has been called, buf addr: %p", data);
++
++    res = invoke_pta_pac(PTA_PAC_CMD_WRITE, data, size);
++
++    IMSG("[libpac] PAC_Write exit");
++
++    return res;
++}
++
++TEE_Result PAC_Read(uint8_t* data, uint32_t size)
++{
++    TEE_Result res = TEE_ERROR_GENERIC;
++
++    IMSG("[libpac] PAC_Read has been called, buf addr: %p", data);
++
++    res = invoke_pta_pac(PTA_PAC_CMD_READ, data, size);
++
++    IMSG("[libpac] PAC_Read exit");
++
++    return res;
++}
+diff --git a/lib/libpac/sub.mk b/lib/libpac/sub.mk
+new file mode 100644
+index 00000000..746fdd2f
+--- /dev/null
++++ b/lib/libpac/sub.mk
+@@ -0,0 +1,2 @@
++global-incdirs-y += include
++srcs-y += libpac.c
+diff --git a/lib/libutee/arch/arm/utee_syscalls_asm.S b/lib/libutee/arch/arm/utee_syscalls_asm.S
+index 44bc60d2..47a1a59a 100644
+--- a/lib/libutee/arch/arm/utee_syscalls_asm.S
++++ b/lib/libutee/arch/arm/utee_syscalls_asm.S
+@@ -25,6 +25,9 @@
+         UTEE_SYSCALL _utee_get_cancellation_flag, \
+                      TEE_SCN_GET_CANCELLATION_FLAG, 1
+ 
++        // MOD(yucy): add set access rights
++        UTEE_SYSCALL _utee_set_access_rights, TEE_SCN_SET_ACCESS_RIGHTS, 3
++
+         UTEE_SYSCALL _utee_check_access_rights, TEE_SCN_CHECK_ACCESS_RIGHTS, 3
+ 
+         UTEE_SYSCALL _utee_unmask_cancellation, TEE_SCN_UNMASK_CANCELLATION, 1
+@@ -122,3 +125,7 @@
+                      TEE_SCN_CRYP_OBJ_GENERATE_KEY, 4
+ 
+         UTEE_SYSCALL _utee_cache_operation, TEE_SCN_CACHE_OPERATION, 3
++
++	// MOD(ZFL): Add PAC syscalls
++        UTEE_SYSCALL _utee_pac_service_write, TEE_SCN_PAC_SERVICE_WRITE, 2
++        UTEE_SYSCALL _utee_pac_service_read, TEE_SCN_PAC_SERVICE_READ, 2
+diff --git a/lib/libutee/include/tee_api.h b/lib/libutee/include/tee_api.h
+index 251af3ce..3a1ea996 100644
+--- a/lib/libutee/include/tee_api.h
++++ b/lib/libutee/include/tee_api.h
+@@ -80,6 +80,9 @@ bool TEE_MaskCancellation(void);
+ 
+ /* System API - Memory Management */
+ 
++// MOD(yucy): set memory access rights
++TEE_Result TEE_SetMemoryAccessRights(uint32_t prot, void *buffer, uint32_t size);
++
+ TEE_Result TEE_CheckMemoryAccessRights(uint32_t accessFlags, void *buffer,
+ 				       uint32_t size);
+ 
+@@ -441,4 +444,9 @@ void TEE_BigIntComputeFMM(TEE_BigIntFMM *dest, const TEE_BigIntFMM *op1,
+ 			  const TEE_BigIntFMM *op2, const TEE_BigInt *n,
+ 			  const TEE_BigIntFMMContext *context);
+ 
++
++// MOD(ZFL): Add PAC interfaces
++TEE_Result Tee_PAC_Write(void *buf, size_t len);
++TEE_Result Tee_PAC_Read(void *buf, size_t len);
++
+ #endif /* TEE_API_H */
+diff --git a/lib/libutee/include/tee_syscall_numbers.h b/lib/libutee/include/tee_syscall_numbers.h
+index 82d429b3..4e8a1e33 100644
+--- a/lib/libutee/include/tee_syscall_numbers.h
++++ b/lib/libutee/include/tee_syscall_numbers.h
+@@ -80,7 +80,15 @@
+ /* End of deprecated Secure Element API syscalls */
+ #define TEE_SCN_CACHE_OPERATION			70
+ 
+-#define TEE_SCN_MAX				70
++// MOD(yucy): Add set access rights
++#define TEE_SCN_SET_ACCESS_RIGHTS		71
++
++// MOD(ZFL): Add PAC syscalls
++#define TEE_SCN_PAC_SERVICE_WRITE        	72
++#define TEE_SCN_PAC_SERVICE_READ         	73
++
++#define TEE_SCN_MAX				73
++//#define TEE_SCN_MAX				70
+ 
+ /* Maximum number of allowed arguments for a syscall */
+ #define TEE_SVC_MAX_ARGS			8
+diff --git a/lib/libutee/include/utee_syscalls.h b/lib/libutee/include/utee_syscalls.h
+index add095b0..b352691f 100644
+--- a/lib/libutee/include/utee_syscalls.h
++++ b/lib/libutee/include/utee_syscalls.h
+@@ -62,6 +62,10 @@ TEE_Result _utee_invoke_ta_command(unsigned long sess,
+ 				   struct utee_params *params,
+ 				   uint32_t *ret_orig);
+ 
++// MOD(yucy): add set access rights
++TEE_Result _utee_set_access_rights(uint32_t flags, const void *buf,
++				     size_t len);
++
+ TEE_Result _utee_check_access_rights(uint32_t flags, const void *buf,
+ 				     size_t len);
+ 
+@@ -288,4 +292,9 @@ TEE_Result _utee_cache_operation(void *va, size_t l, unsigned long op);
+ 
+ TEE_Result _utee_gprof_send(void *buf, size_t size, uint32_t *id);
+ 
++
++// MOD(ZFL): Add PAC syscalls
++TEE_Result _utee_pac_service_write(uint8_t *buf, size_t len);
++TEE_Result _utee_pac_service_read(uint8_t *buf, size_t len);
++
+ #endif /* UTEE_SYSCALLS_H */
+diff --git a/lib/libutee/tee_api.c b/lib/libutee/tee_api.c
+index 990acd44..e50f0961 100644
+--- a/lib/libutee/tee_api.c
++++ b/lib/libutee/tee_api.c
+@@ -285,6 +285,24 @@ bool TEE_MaskCancellation(void)
+ 
+ /* System API - Memory Management */
+ 
++// MOD(yucy): set memory access rights
++TEE_Result TEE_SetMemoryAccessRights(uint32_t prot, void *buffer,
++				     uint32_t size)
++{
++	TEE_Result res;
++
++	if(size == 0)
++		return TEE_SUCCESS;
++
++	res = _utee_set_access_rights(prot, buffer, size);
++	if(res != TEE_SUCCESS)
++		goto out;
++
++	res = TEE_SUCCESS;
++out:
++	return res;
++}
++
+ TEE_Result TEE_CheckMemoryAccessRights(uint32_t accessFlags, void *buffer,
+ 				       uint32_t size)
+ {
+@@ -444,3 +462,27 @@ TEE_Result TEE_CacheInvalidate(char *buf, size_t len)
+ {
+ 	return _utee_cache_operation(buf, len, TEE_CACHEINVALIDATE);
+ }
++
++
++// MOD(ZFL): Add PAC interfaces
++TEE_Result Tee_PAC_Write(void *buf, size_t len)
++{
++	TEE_Result res = TEE_SUCCESS;
++
++	IMSG("[libutee] Tee_PAC_Write has been called, buf addr: %p", buf);
++	res = _utee_pac_service_write(buf, len);
++	IMSG("[libutee] Tee_PAC_Write exit");
++
++	return res;
++}
++
++TEE_Result Tee_PAC_Read(void *buf, size_t len)
++{
++	TEE_Result res = TEE_SUCCESS;
++
++	IMSG("[libutee] Tee_PAC_Read has been called, buf addr: %p", buf);
++	res = _utee_pac_service_read(buf, len);
++	IMSG("[libutee] Tee_PAC_Read exit");
++
++	return res;
++}
+diff --git a/ta/mk/ta_dev_kit.mk b/ta/mk/ta_dev_kit.mk
+index 1fb0e418..4446a15f 100644
+--- a/ta/mk/ta_dev_kit.mk
++++ b/ta/mk/ta_dev_kit.mk
+@@ -85,6 +85,9 @@ libdeps += $(ta-dev-kit-dir$(sm))/lib/libmbedtls.a
+ endif
+ libnames += dl
+ libdeps += $(ta-dev-kit-dir$(sm))/lib/libdl.a
++# MOD(ZFL): Add libpac
++libnames += pac
++libdeps += $(ta-dev-kit-dir$(sm))/lib/libpac.a
+ 
+ # libutils provides __getauxval symbol which is needed by libgcc 10.x. We can't
+ # link libutils after libgcc, because libgcc will replace some symbols provided
+diff --git a/ta/ta.mk b/ta/ta.mk
+index dbd90d11..6d935982 100644
+--- a/ta/ta.mk
++++ b/ta/ta.mk
+@@ -103,6 +103,13 @@ libuuid = be807bbd-81e1-4dc4-bd99-3d363f240ece
+ libl = utee utils
+ include mk/lib.mk
+ 
++# MOD(ZFL): Add libpac
++libname = pac
++libdir = lib/libpac
++libuuid = 6ddbbf6a-e639-48a1-9315-7fc403436925
++libl = utee utils
++include mk/lib.mk
++
+ base-prefix :=
+ 
+ incdirs-host := $(filter-out lib/libutils%, $(incdirs$(sm)))

@@ -1,0 +1,143 @@
+diff --git a/libteec/include/linux/tee.h b/libteec/include/linux/tee.h
+index f883ebc..b77b5b0 100644
+--- a/libteec/include/linux/tee.h
++++ b/libteec/include/linux/tee.h
+@@ -365,6 +365,9 @@ struct tee_ioctl_shm_register_data {
+ 	__u64 length;
+ 	__u32 flags;
+ 	__s32 id;
++	// MOD(yucy): add prot
++	__u32 prot;
++	__u32 prot_is_set;
+ };
+ 
+ /**
+diff --git a/libteec/src/tee_client_api.c b/libteec/src/tee_client_api.c
+index d8cc4b5..3276737 100644
+--- a/libteec/src/tee_client_api.c
++++ b/libteec/src/tee_client_api.c
+@@ -141,7 +141,10 @@ static int teec_shm_alloc(int fd, size_t size, int *id)
+ 	return shm_fd;
+ }
+ 
+-static int teec_shm_register(int fd, void *buf, size_t size, int *id)
++// MOD(yucy): set shm prot and prot_is_set
++//static int teec_shm_register(int fd, void *buf, size_t size, int *id)
++static int teec_shm_register(int fd, void *buf, size_t size,
++		uint32_t prot, uint32_t prot_is_set, int *id)
+ {
+ 	int shm_fd = 0;
+ 	struct tee_ioctl_shm_register_data data;
+@@ -150,6 +153,9 @@ static int teec_shm_register(int fd, void *buf, size_t size, int *id)
+ 
+ 	data.addr = (uintptr_t)buf;
+ 	data.length = size;
++	// MOD(yucy): set shm prot and prot_is_set
++	data.prot = prot;
++	data.prot_is_set = prot_is_set;
+ 	shm_fd = ioctl(fd, TEE_IOC_SHM_REGISTER, &data);
+ 	if (shm_fd < 0)
+ 		return -1;
+@@ -230,6 +236,17 @@ static TEEC_Result teec_pre_process_tmpref(TEEC_Context *ctx,
+ 		}
+ 	} else {
+ 		shm->buffer = tmpref->buffer;
++		// MOD(yucy): change shm prot
++		if(tmpref->prot_is_set){
++			shm->old_prot = tmpref->prot;
++			shm->prot_is_set = 1;
++		}
++		else{
++			shm->old_prot = PROT_READ | PROT_WRITE;
++		}
++		// MOD(yucy): change the shm buffer to RW
++		res = mprotect(shm->buffer, shm->size, PROT_READ | PROT_WRITE);
++
+ 		res = TEEC_RegisterSharedMemory(ctx, shm);
+ 		if (res != TEEC_SUCCESS)
+ 			return res;
+@@ -400,10 +417,14 @@ static void teec_post_process_tmpref(uint32_t param_type,
+ 			TEEC_SharedMemory *shm)
+ {
+ 	if (param_type != TEEC_MEMREF_TEMP_INPUT) {
+-		if (tmpref->buffer && shm->shadow_buffer)
++		if (tmpref->buffer && shm->shadow_buffer) {
+ 			memcpy(tmpref->buffer, shm->shadow_buffer,
+ 			       MIN(MEMREF_SIZE(param), tmpref->size));
+-
++		}
++		// MOD(yucy): resume buffer prot
++		else if (tmpref->buffer && tmpref->prot_is_set) {
++			mprotect(tmpref->buffer, tmpref->size, tmpref->prot);
++		}
+ 		tmpref->size = MEMREF_SIZE(param);
+ 	}
+ }
+@@ -737,6 +758,7 @@ TEEC_Result TEEC_InvokeCommand(TEEC_Session *session, uint32_t cmd_id,
+ 
+ 	res = arg->ret;
+ 	eorig = arg->ret_origin;
++
+ 	teec_post_process_operation(operation, params, shm);
+ 
+ 	bm_timestamp();
+@@ -792,7 +814,10 @@ TEEC_Result TEEC_RegisterSharedMemory(TEEC_Context *ctx, TEEC_SharedMemory *shm)
+ 	if (!s)
+ 		s = 8;
+ 	if (ctx->reg_mem) {
+-		fd = teec_shm_register(ctx->fd, shm->buffer, s, &shm->id);
++		// MOD(yucy): set shm prot and prot_is_set
++		// fd = teec_shm_register(ctx->fd, shm->buffer, s, &shm->id);
++		fd = teec_shm_register(ctx->fd, shm->buffer, s, shm->old_prot,
++				shm->prot_is_set, &shm->id);
+ 		if (fd >= 0) {
+ 			shm->registered_fd = fd;
+ 			shm->shadow_buffer = NULL;
+@@ -812,8 +837,11 @@ TEEC_Result TEEC_RegisterSharedMemory(TEEC_Context *ctx, TEEC_SharedMemory *shm)
+ 		shm->shadow_buffer = teec_paged_aligned_alloc(s);
+ 		if (!shm->shadow_buffer)
+ 			return TEEC_ERROR_OUT_OF_MEMORY;
++		// MOD(yucy): set shm prot and prot_is_set
++		//fd = teec_shm_register(ctx->fd, shm->shadow_buffer, s,
++		//		       &shm->id);
+ 		fd = teec_shm_register(ctx->fd, shm->shadow_buffer, s,
+-				       &shm->id);
++				       PROT_READ | PROT_WRITE, 0, &shm->id);
+ 		if (fd >= 0) {
+ 			shm->registered_fd = fd;
+ 			shm->internal.flags = SHM_FLAG_SHADOW_BUFFER_ALLOCED;
+@@ -896,7 +924,9 @@ TEEC_Result TEEC_AllocateSharedMemory(TEEC_Context *ctx, TEEC_SharedMemory *shm)
+ 		if (!shm->buffer)
+ 			return TEEC_ERROR_OUT_OF_MEMORY;
+ 
+-		fd = teec_shm_register(ctx->fd, shm->buffer, s, &shm->id);
++		// MOD(ZFL): set shm prot and prot_is_set
++		//fd = teec_shm_register(ctx->fd, shm->buffer, s, &shm->id);
++		fd = teec_shm_register(ctx->fd, shm->buffer, s, PROT_READ | PROT_WRITE, 0, &shm->id);
+ 		if (fd < 0) {
+ 			free(shm->buffer);
+ 			shm->buffer = NULL;
+diff --git a/public/tee_client_api.h b/public/tee_client_api.h
+index 715ca6b..9160055 100644
+--- a/public/tee_client_api.h
++++ b/public/tee_client_api.h
+@@ -302,6 +302,9 @@ typedef struct {
+ 		bool dummy;
+ 		uint8_t flags;
+ 	} internal;
++	// MOD(yucy): add prot
++        uint32_t old_prot;
++        uint32_t prot_is_set;
+ } TEEC_SharedMemory;
+ 
+ /**
+@@ -319,6 +322,9 @@ typedef struct {
+ typedef struct {
+ 	void *buffer;
+ 	size_t size;
++	// MOD(yucy): add prot
++	uint32_t prot;
++	uint32_t prot_is_set;
+ } TEEC_TempMemoryReference;
+ 
+ /**

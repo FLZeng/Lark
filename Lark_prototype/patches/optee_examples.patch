@@ -1,0 +1,993 @@
+diff --git a/ac/Android.mk b/ac/Android.mk
+new file mode 100644
+index 0000000..a797f13
+--- /dev/null
++++ b/ac/Android.mk
+@@ -0,0 +1,18 @@
++###################### optee-hello-world ######################
++LOCAL_PATH := $(call my-dir)
++
++include $(CLEAR_VARS)
++LOCAL_CFLAGS += -DANDROID_BUILD
++LOCAL_CFLAGS += -Wall
++
++LOCAL_SRC_FILES += host/main.c
++
++LOCAL_C_INCLUDES := $(LOCAL_PATH)/ta/include
++
++LOCAL_SHARED_LIBRARIES := libteec
++LOCAL_MODULE := optee_example_ac
++LOCAL_VENDOR_MODULE := true
++LOCAL_MODULE_TAGS := optional
++include $(BUILD_EXECUTABLE)
++
++include $(LOCAL_PATH)/ta/Android.mk
+diff --git a/ac/CMakeLists.txt b/ac/CMakeLists.txt
+new file mode 100644
+index 0000000..e97e92f
+--- /dev/null
++++ b/ac/CMakeLists.txt
+@@ -0,0 +1,13 @@
++project (optee_example_ac C)
++
++set (SRC host/main.c)
++
++add_executable (${PROJECT_NAME} ${SRC})
++
++target_include_directories(${PROJECT_NAME}
++			   PRIVATE ta/include
++			   PRIVATE include)
++
++target_link_libraries (${PROJECT_NAME} PRIVATE teec)
++
++install (TARGETS ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_BINDIR})
+diff --git a/ac/Makefile b/ac/Makefile
+new file mode 100644
+index 0000000..b188683
+--- /dev/null
++++ b/ac/Makefile
+@@ -0,0 +1,15 @@
++export V?=0
++
++# If _HOST or _TA specific compilers are not specified, then use CROSS_COMPILE
++HOST_CROSS_COMPILE ?= $(CROSS_COMPILE)
++TA_CROSS_COMPILE ?= $(CROSS_COMPILE)
++
++.PHONY: all
++all:
++	$(MAKE) -C host CROSS_COMPILE="$(HOST_CROSS_COMPILE)" --no-builtin-variables
++	$(MAKE) -C ta CROSS_COMPILE="$(TA_CROSS_COMPILE)" LDFLAGS=""
++
++.PHONY: clean
++clean:
++	$(MAKE) -C host clean
++	$(MAKE) -C ta clean
+diff --git a/ac/host/Makefile b/ac/host/Makefile
+new file mode 100644
+index 0000000..8bc341e
+--- /dev/null
++++ b/ac/host/Makefile
+@@ -0,0 +1,28 @@
++CC      ?= $(CROSS_COMPILE)gcc
++LD      ?= $(CROSS_COMPILE)ld
++AR      ?= $(CROSS_COMPILE)ar
++NM      ?= $(CROSS_COMPILE)nm
++OBJCOPY ?= $(CROSS_COMPILE)objcopy
++OBJDUMP ?= $(CROSS_COMPILE)objdump
++READELF ?= $(CROSS_COMPILE)readelf
++
++OBJS = main.o
++
++CFLAGS += -Wall -I../ta/include -I$(TEEC_EXPORT)/include -I./include
++#Add/link other required libraries here
++LDADD += -lteec -L$(TEEC_EXPORT)/lib
++
++BINARY = optee_example_ac
++
++.PHONY: all
++all: $(BINARY)
++
++$(BINARY): $(OBJS)
++	$(CC) $(LDFLAGS) -o $@ $< $(LDADD)
++
++.PHONY: clean
++clean:
++	rm -f $(OBJS) $(BINARY)
++
++%.o: %.c
++	$(CC) $(CFLAGS) -c $< -o $@
+diff --git a/ac/host/main.c b/ac/host/main.c
+new file mode 100644
+index 0000000..1b0e83a
+--- /dev/null
++++ b/ac/host/main.c
+@@ -0,0 +1,427 @@
++
++#include <err.h>
++#include <fcntl.h>
++#include <signal.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/mman.h>
++#include <sys/stat.h>
++#include <sys/types.h>
++#include <unistd.h>
++
++/* OP-TEE TEE client API (built by optee_client) */
++#include <tee_client_api.h>
++
++/* For the UUID (found in the TA's h-file(s)) */
++#include <ac_ta.h>
++
++void test_basic()
++{
++    uint8_t *buf;
++    int size;
++
++    TEEC_Result res;
++    TEEC_Context ctx;
++    TEEC_Session sess;
++    TEEC_Operation op;
++    TEEC_UUID uuid = TA_AC_UUID;
++    uint32_t err_origin;
++
++    size = getpagesize();
++    buf = (uint8_t *)malloc(size);
++    memset(buf, 0, size);
++
++    /* Initialize a context connecting us to the TEE */
++    res = TEEC_InitializeContext(NULL, &ctx);
++    if (res != TEEC_SUCCESS)
++        errx(1, "TEEC_InitializeContext failed with code 0x%x", res);
++
++    /* Open a session to the AC TA */
++    res = TEEC_OpenSession(&ctx, &sess, &uuid, TEEC_LOGIN_PUBLIC, NULL, NULL,
++                           &err_origin);
++    if (res != TEEC_SUCCESS)
++        errx(1, "TEEC_Opensession failed with code 0x%x origin 0x%x", res,
++             err_origin);
++
++    /* Clear the TEEC_Operation struct */
++    memset(&op, 0, sizeof(op));
++    op.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_INOUT,
++                                     TEEC_NONE,
++                                     TEEC_NONE,
++                                     TEEC_NONE);
++    op.params[0].tmpref.buffer = buf;
++    // op.params[0].tmpref.size = size;
++    op.params[0].tmpref.size = 64;
++
++    printf("[App] Invoking AC_TA to call ta write ...\n");
++    strcpy(buf, "TA_WRITE_CONTENT");
++    res = TEEC_InvokeCommand(&sess, TA_AC_CMD_TA_WRITE, &op, &err_origin);
++    if (res != TEEC_SUCCESS)
++        errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x", res,
++             err_origin);
++
++    printf("[App] Invoking AC_TA to call ta read ...\n");
++    res = TEEC_InvokeCommand(&sess, TA_AC_CMD_TA_READ, &op, &err_origin);
++    if (res != TEEC_SUCCESS)
++    {
++        free(buf);
++        errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x", res,
++             err_origin);
++    }
++
++    printf("[App] Invoking AC_TA to call pta write ...\n");
++    strcpy(buf, "PTA_WRITE_CONTENT");
++    res = TEEC_InvokeCommand(&sess, TA_AC_CMD_PTA_WRITE, &op, &err_origin);
++    if (res != TEEC_SUCCESS)
++    {
++        free(buf);
++        errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x", res,
++             err_origin);
++    }
++
++    printf("[App] Invoking AC_TA to call pta read ...\n");
++    res = TEEC_InvokeCommand(&sess, TA_AC_CMD_PTA_READ, &op, &err_origin);
++    if (res != TEEC_SUCCESS)
++    {
++        free(buf);
++        errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x", res,
++             err_origin);
++    }
++
++    printf("[App] Invoking AC_TA to call syscall write ...\n");
++    strcpy(buf, "SYSCALL_WRITE_CONTENT");
++    res = TEEC_InvokeCommand(&sess, TA_AC_CMD_SYSCALL_WRITE, &op, &err_origin);
++    if (res != TEEC_SUCCESS)
++    {
++        free(buf);
++        errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x", res,
++             err_origin);
++    }
++
++    printf("[App] Invoking AC_TA to call syscall read ...\n");
++    res = TEEC_InvokeCommand(&sess, TA_AC_CMD_SYSCALL_READ, &op, &err_origin);
++    if (res != TEEC_SUCCESS)
++    {
++        free(buf);
++        errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x", res,
++             err_origin);
++    }
++
++    /* Close the session and destroy the context. */
++    TEEC_CloseSession(&sess);
++    TEEC_FinalizeContext(&ctx);
++    free(buf);
++}
++
++void test_access_control()
++{
++    uint8_t *buf;
++    int size;
++    int fd;
++    int ret;
++
++    TEEC_Result res;
++    TEEC_Context ctx;
++    TEEC_Session sess;
++    TEEC_Operation op;
++    TEEC_UUID uuid = TA_AC_UUID;
++    uint32_t err_origin;
++
++    size = getpagesize();
++    fd = open("/dev/zero", O_RDONLY);
++    buf = (uint8_t *)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
++    close(fd);
++
++    memset(buf, 0, size);
++
++    /* Initialize a context connecting us to the TEE */
++    res = TEEC_InitializeContext(NULL, &ctx);
++    if (res != TEEC_SUCCESS)
++        errx(1, "TEEC_InitializeContext failed with code 0x%x", res);
++
++    /* Open a session to the AC TA */
++    res = TEEC_OpenSession(&ctx, &sess, &uuid, TEEC_LOGIN_PUBLIC, NULL, NULL,
++                           &err_origin);
++    if (res != TEEC_SUCCESS)
++        errx(1, "TEEC_Opensession failed with code 0x%x origin 0x%x", res,
++             err_origin);
++
++    /* Clear the TEEC_Operation struct */
++    memset(&op, 0, sizeof(op));
++    op.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_INOUT,
++                                     TEEC_NONE,
++                                     TEEC_NONE,
++                                     TEEC_NONE);
++    op.params[0].tmpref.buffer = buf;
++    // op.params[0].tmpref.size = size;
++    op.params[0].tmpref.size = 64;
++
++    printf("[App] test_access_control buf addr: %p\n", buf);
++    printf("-----------------------------------------\n");
++    printf("[App] Invoking AC_TA to call ta write ...\n");
++    strcpy(buf, "TA_WRITE_CONTENT");
++    res = TEEC_InvokeCommand(&sess, TA_AC_CMD_TA_WRITE, &op, &err_origin);
++    if (res != TEEC_SUCCESS)
++        errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x", res,
++             err_origin);
++
++    printf("-----------------------------------------\n");
++    printf("[App] Invoking AC_TA to call ta read ...\n");
++
++    res = TEEC_InvokeCommand(&sess, TA_AC_CMD_TA_READ, &op, &err_origin);
++    if (res != TEEC_SUCCESS)
++    {
++        munmap(buf, size);
++        errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x", res,
++             err_origin);
++    }
++
++    strcpy(buf, "PTA_WRITE_CONTENT");
++
++    // ret = mprotect(buf, size, PROT_WRITE);
++    // printf("[App] mprotect: Change buffer to PROT_WRITE, ret = %d\n", ret);
++
++    printf("-----------------------------------------\n");
++    printf("[App] Invoking AC_TA to call pta write ...\n");
++    res = TEEC_InvokeCommand(&sess, TA_AC_CMD_PTA_WRITE, &op, &err_origin);
++    if (res != TEEC_SUCCESS)
++    {
++        munmap(buf, size);
++        errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x", res,
++             err_origin);
++    }
++
++    // ret = mprotect(buf, size, PROT_WRITE);
++    // printf("[App] mprotect: Change buffer to PROT_WRITE, ret = %d\n", ret);
++
++    printf("-----------------------------------------\n");
++    printf("[App] Invoking AC_TA to call pta read ...\n");
++    res = TEEC_InvokeCommand(&sess, TA_AC_CMD_PTA_READ, &op, &err_origin);
++    if (res != TEEC_SUCCESS)
++    {
++        munmap(buf, size);
++        errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x", res,
++             err_origin);
++    }
++
++    strcpy(buf, "SYSCALL_WRITE_CONTENT");
++    // ret = mprotect(buf, size, PROT_READ);
++    // printf("[App] mprotect: Change buffer to PROT_READ, ret = %d\n", ret);
++
++    printf("-----------------------------------------\n");
++    printf("[App] Invoking AC_TA to call syscall write ...\n");
++    res = TEEC_InvokeCommand(&sess, TA_AC_CMD_SYSCALL_WRITE, &op, &err_origin);
++    if (res != TEEC_SUCCESS)
++    {
++        munmap(buf, size);
++        errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x", res,
++             err_origin);
++    }
++
++    // ret = mprotect(buf, size, PROT_READ);
++    // printf("[App] mprotect: Change buffer to PROT_READ, ret = %d\n", ret);
++
++    printf("-----------------------------------------\n");
++    printf("[App] Invoking AC_TA to call syscall read ...\n");
++    res = TEEC_InvokeCommand(&sess, TA_AC_CMD_SYSCALL_READ, &op, &err_origin);
++    if (res != TEEC_SUCCESS)
++    {
++        munmap(buf, size);
++        errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x", res,
++             err_origin);
++    }
++
++    printf("-----------------------------------------\n");
++
++    /* Close the session and destroy the context. */
++    TEEC_CloseSession(&sess);
++    TEEC_FinalizeContext(&ctx);
++    munmap(buf, size);
++}
++
++void test_access_control_2()
++{
++    uint8_t *buf;
++    int size;
++    int fd;
++    int ret;
++
++    TEEC_Result res;
++    TEEC_Context ctx;
++    TEEC_Session sess;
++    TEEC_Operation op;
++    TEEC_UUID uuid = TA_AC_UUID;
++    uint32_t err_origin;
++
++    size = getpagesize();
++    fd = open("/dev/zero", O_RDONLY);
++    buf = (uint8_t *)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
++    close(fd);
++
++    memset(buf, 0, size);
++
++    /* Initialize a context connecting us to the TEE */
++    res = TEEC_InitializeContext(NULL, &ctx);
++    if (res != TEEC_SUCCESS)
++        errx(1, "TEEC_InitializeContext failed with code 0x%x", res);
++
++    /* Open a session to the AC TA */
++    res = TEEC_OpenSession(&ctx, &sess, &uuid, TEEC_LOGIN_PUBLIC, NULL, NULL,
++                           &err_origin);
++    if (res != TEEC_SUCCESS)
++        errx(1, "TEEC_Opensession failed with code 0x%x origin 0x%x", res,
++             err_origin);
++
++    /* Clear the TEEC_Operation struct */
++    memset(&op, 0, sizeof(op));
++    op.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_INOUT,
++                                     TEEC_NONE,
++                                     TEEC_NONE,
++                                     TEEC_NONE);
++    op.params[0].tmpref.buffer = buf;
++    // op.params[0].tmpref.size = size;
++    op.params[0].tmpref.size = 64;
++
++    printf("[App] test_access_control buf addr: %p\n", buf);
++
++    strcpy(buf, "my test content\n");
++    //uint32_t new_prot = PROT_READ | PROT_WRITE;
++    uint32_t new_prot = PROT_READ;
++    ret = mprotect(buf, size, new_prot);
++    op.params[0].tmpref.prot = new_prot;
++    op.params[0].tmpref.prot_is_set = 1;
++
++    printf("[App] mprotect: Change buffer to PROT_READ, ret = %d\n", ret);
++
++    printf("-----------------------------------------\n");
++    printf("[App] Invoking AC_TA to call syscall write ...\n");
++    res = TEEC_InvokeCommand(&sess, TA_AC_CMD_SYSCALL_WRITE, &op, &err_origin);
++    if (res != TEEC_SUCCESS)
++    {
++        munmap(buf, size);
++        errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x", res,
++             err_origin);
++    }
++
++    //ret = mprotect(buf, size, PROT_READ);
++    //printf("[App] mprotect: Change buffer to PROT_READ, ret = %d\n", ret);
++
++    printf("-----------------------------------------\n");
++    printf("[App] Invoking AC_TA to call syscall read ...\n");
++    res = TEEC_InvokeCommand(&sess, TA_AC_CMD_SYSCALL_READ, &op, &err_origin);
++    if (res != TEEC_SUCCESS)
++    {
++        munmap(buf, size);
++        errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x", res,
++             err_origin);
++    }
++
++    printf("-----------------------------------------\n");
++
++    /* Close the session and destroy the context. */
++    TEEC_CloseSession(&sess);
++    TEEC_FinalizeContext(&ctx);
++    munmap(buf, size);
++}
++
++void test_integrate()
++{
++    int fd;
++    int ret;
++    int alloc_size;
++    char *memory;
++
++    alloc_size = getpagesize();
++    printf("page size: %d\n", alloc_size);
++
++    fd = open("/dev/zero", O_RDONLY);
++    memory = mmap(NULL, alloc_size, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
++    close(fd);
++
++    // strcpy(memory, "hello world");
++    printf("memory addr: %p\n", memory);
++
++    // ret = mprotect(memory, alloc_size, PROT_READ);
++    // printf("mprotect PROT_WRITE, ret = %d\n", ret);
++
++    // printf("READ: memory[0] = %d\n", memory[0]);
++    // memory[0] = 12;
++    // printf("WRITE: memory[0] = %d\n", memory[0]);
++
++    TEEC_Result res;
++    TEEC_Context ctx;
++    TEEC_Session sess;
++    TEEC_UUID uuid = TA_AC_UUID;
++    uint32_t err_origin;
++
++    /* Clear the TEEC_Operation struct */
++    memset(memory, 0, alloc_size);
++    TEEC_Operation *op = (TEEC_Operation *)memory;
++
++    /* Initialize a context connecting us to the TEE */
++    res = TEEC_InitializeContext(NULL, &ctx);
++    if (res != TEEC_SUCCESS)
++        errx(1, "TEEC_InitializeContext failed with code 0x%x", res);
++
++    /* Open a session to the "ac" TA */
++    res = TEEC_OpenSession(&ctx, &sess, &uuid, TEEC_LOGIN_PUBLIC, NULL, NULL,
++                           &err_origin);
++    if (res != TEEC_SUCCESS)
++        errx(1, "TEEC_Opensession failed with code 0x%x origin 0x%x", res,
++             err_origin);
++
++    /*
++     * Prepare the argument. Pass a value in the first parameter,
++     * the remaining three parameters are unused.
++     */
++    (*op).paramTypes =
++        TEEC_PARAM_TYPES(TEEC_VALUE_INOUT, TEEC_NONE, TEEC_NONE, TEEC_NONE);
++    (*op).params[0].value.a = 100;
++
++    printf("Invoking TA to call pac syscall ...\n");
++    res = TEEC_InvokeCommand(&sess, TA_AC_CMD_PAC_SYSCALL, op, &err_origin);
++    if (res != TEEC_SUCCESS)
++        errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x", res,
++             err_origin);
++
++    printf("Invoking TA to call pac pta ...\n");
++    res = TEEC_InvokeCommand(&sess, TA_AC_CMD_PAC_PTA, op, &err_origin);
++    if (res != TEEC_SUCCESS)
++        errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x", res,
++             err_origin);
++
++    /*
++     * TA_AC_CMD_DEC_VALUE is the actual function in the TA to be
++     * called.
++     */
++    printf("Invoking TA to decrease %d\n", (*op).params[0].value.a);
++    res = TEEC_InvokeCommand(&sess, TA_AC_CMD_DEC_VALUE, op, &err_origin);
++    if (res != TEEC_SUCCESS)
++        errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x", res,
++             err_origin);
++    printf("TA decreased value to %d\n", (*op).params[0].value.a);
++
++    ret = mprotect(memory, alloc_size, PROT_READ);
++    printf("mprotect: Change TEEC_Operation parameter to PROT_READ, ret = %d\n",
++           ret);
++
++    printf("Invoking TA to decrease %d\n", (*op).params[0].value.a);
++    res = TEEC_InvokeCommand(&sess, TA_AC_CMD_DEC_VALUE, op, &err_origin);
++    if (res != TEEC_SUCCESS)
++        errx(1, "TEEC_InvokeCommand failed with code 0x%x origin 0x%x", res,
++             err_origin);
++    printf("TA decreased value to %d\n", (*op).params[0].value.a);
++
++    /* Close the session and destroy the context. */
++    TEEC_CloseSession(&sess);
++    TEEC_FinalizeContext(&ctx);
++}
++
++int main(void)
++{
++    // test_basic();
++    test_access_control_2();
++
++    return 0;
++}
+diff --git a/ac/ta/Android.mk b/ac/ta/Android.mk
+new file mode 100644
+index 0000000..d70860a
+--- /dev/null
++++ b/ac/ta/Android.mk
+@@ -0,0 +1,4 @@
++LOCAL_PATH := $(call my-dir)
++
++local_module := 734a259d-25ce-44ce-9cde-c2284cd046b0.ta
++include $(BUILD_OPTEE_MK)
+diff --git a/ac/ta/Makefile b/ac/ta/Makefile
+new file mode 100644
+index 0000000..bef3d2d
+--- /dev/null
++++ b/ac/ta/Makefile
+@@ -0,0 +1,13 @@
++CFG_TEE_TA_LOG_LEVEL ?= 4
++
++# The UUID for the Trusted Application
++BINARY=734a259d-25ce-44ce-9cde-c2284cd046b0
++
++-include $(TA_DEV_KIT_DIR)/mk/ta_dev_kit.mk
++@echo 'Note: TA_DEV_KIT_DIR=$(TA_DEV_KIT_DIR)'
++
++ifeq ($(wildcard $(TA_DEV_KIT_DIR)/mk/ta_dev_kit.mk), )
++clean:
++	@echo 'Note: $$(TA_DEV_KIT_DIR)/mk/ta_dev_kit.mk not found, cannot clean TA'
++	@echo 'Note: TA_DEV_KIT_DIR=$(TA_DEV_KIT_DIR)'
++endif
+diff --git a/ac/ta/ac_ta.c b/ac/ta/ac_ta.c
+new file mode 100644
+index 0000000..b21465e
+--- /dev/null
++++ b/ac/ta/ac_ta.c
+@@ -0,0 +1,341 @@
++#include <stdlib.h>
++#include <string.h>
++
++#include <tee_internal_api.h>
++#include <tee_internal_api_extensions.h>
++
++#include <libpac.h>
++
++#include <ac_ta.h>
++
++uint8_t g_ac_buffer[64] = {0};
++
++TEE_Result TA_CreateEntryPoint(void)
++{
++    IMSG("\n\n[TA_AC] TA_AC has been created");
++
++    return TEE_SUCCESS;
++}
++
++void TA_DestroyEntryPoint(void)
++{
++    IMSG("[TA_AC] TA_AC has been destoryed");
++}
++
++TEE_Result TA_OpenSessionEntryPoint(uint32_t param_types,
++                                    TEE_Param __maybe_unused params[4],
++                                    void __maybe_unused **sess_ctx)
++{
++    uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE);
++
++    IMSG("[TA_AC] TA_AC has been opened");
++
++    if (param_types != exp_param_types)
++        return TEE_ERROR_BAD_PARAMETERS;
++
++    /* Unused parameters */
++    (void)&params;
++    (void)&sess_ctx;
++
++    /* If return value != TEE_SUCCESS the session will not be created. */
++    return TEE_SUCCESS;
++}
++
++void TA_CloseSessionEntryPoint(void __maybe_unused *sess_ctx)
++{
++    IMSG("[TA_AC] TA_AC has been closed");
++    (void)&sess_ctx; /* Unused parameter */
++}
++
++static TEE_Result inc_value(uint32_t param_types,
++                            TEE_Param params[4])
++{
++    uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_VALUE_INOUT,
++                                               TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE);
++
++    IMSG("\n\n\n[TA_AC] inc_value has been called");
++
++    if (param_types != exp_param_types)
++        return TEE_ERROR_BAD_PARAMETERS;
++
++    IMSG("[TA_AC] inc_value got value: %u from NW", params[0].value.a);
++    params[0].value.a++;
++    IMSG("[TA_AC] inc_value increase value to: %u", params[0].value.a);
++
++    IMSG("[TA_AC] inc_value exit");
++
++    return TEE_SUCCESS;
++}
++
++static TEE_Result dec_value(uint32_t param_types,
++                            TEE_Param params[4])
++{
++    uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_VALUE_INOUT,
++                                               TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE);
++
++    IMSG("\n\n\n[TA_AC] dec_value has been called");
++
++    if (param_types != exp_param_types)
++        return TEE_ERROR_BAD_PARAMETERS;
++
++    IMSG("[TA_AC] dec_value got value: %u from NW", params[0].value.a);
++    params[0].value.a--;
++    IMSG("[TA_AC] dec_value decrease value to: %u", params[0].value.a);
++
++    IMSG("[TA_AC] dec_value exit");
++
++    return TEE_SUCCESS;
++}
++
++TEE_Result ta_write(uint32_t param_types,
++                    TEE_Param params[4])
++{
++    uint8_t *buf = NULL;
++    uint32_t len = 0;
++    uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INOUT,
++                                               TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE);
++
++
++    IMSG("\n\n\n[TA_AC] ta_write has been called");
++
++    if (param_types != exp_param_types)
++        return TEE_ERROR_BAD_PARAMETERS;
++
++    buf = params[0].memref.buffer;
++    len = params[0].memref.size;
++
++    IMSG("[TA_AC] ta_write buf addr: %p", buf);
++
++    memset(g_ac_buffer, 0, 64);
++    memcpy(g_ac_buffer, buf, len);
++
++    IMSG("[TA_AC] ta_write exit");
++
++    return TEE_SUCCESS;
++}
++
++TEE_Result ta_read(uint32_t param_types,
++                   TEE_Param params[4])
++{
++    uint8_t *buf = NULL;
++    uint32_t len = 0;
++    uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INOUT,
++                                               TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE);
++
++    IMSG("\n\n\n[TA_AC] ta_read has been called");
++
++    if (param_types != exp_param_types)
++        return TEE_ERROR_BAD_PARAMETERS;
++
++    buf = params[0].memref.buffer;
++    len = params[0].memref.size;
++
++    IMSG("[TA_AC] ta_read buf addr: %p", buf);
++    memcpy(buf, g_ac_buffer, len);
++    IMSG("[TA_AC] ta_read content: %s", buf, buf);
++
++    IMSG("[TA_AC] ta_read exit");
++
++    return TEE_SUCCESS;
++}
++
++TEE_Result pta_write(uint32_t param_types,
++                     TEE_Param params[4])
++{
++    uint8_t *buf = NULL;
++    uint32_t len = 0;
++    TEE_Result res = TEE_SUCCESS;
++    uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INOUT,
++                                               TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE);
++
++    IMSG("\n\n\n[TA_AC] pta_write has been called");
++
++    if (param_types != exp_param_types)
++        return TEE_ERROR_BAD_PARAMETERS;
++
++    buf = params[0].memref.buffer;
++    len = params[0].memref.size;
++
++    IMSG("[TA_AC] pta_write buf addr: %p", buf);
++    res = PAC_Write((void *)buf, len);
++    IMSG("[TA_AC] PTA call PAC_Write result: %d", res);
++
++    IMSG("[TA_AC] pta_write exit");
++
++    return res;
++}
++
++TEE_Result pta_read(uint32_t param_types,
++                    TEE_Param params[4])
++{
++    uint8_t *buf = NULL;
++    uint32_t len = 0;
++    TEE_Result res = TEE_SUCCESS;
++    uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INOUT,
++                                               TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE);
++
++    IMSG("\n\n\n[TA_AC] pta_read has been called");
++
++    if (param_types != exp_param_types)
++        return TEE_ERROR_BAD_PARAMETERS;
++
++    buf = params[0].memref.buffer;
++    len = params[0].memref.size;
++
++    IMSG("[TA_AC] pta_read buf addr: %p", buf);
++    res = PAC_Read(buf, len);
++    IMSG("[TA_AC] PTA call PAC_Read result:%d, content: %s", res, buf);
++
++    IMSG("[TA_AC] pta_read exit");
++
++    return res;
++}
++
++TEE_Result syscall_write(uint32_t param_types,
++                         TEE_Param params[4])
++{
++    uint8_t *buf = NULL;
++    uint32_t len = 0;
++    TEE_Result res = TEE_SUCCESS;
++    uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INOUT,
++                                               TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE);
++
++    IMSG("\n\n\n[TA_AC] syscall_write has been called");
++
++    if (param_types != exp_param_types)
++        return TEE_ERROR_BAD_PARAMETERS;
++
++    buf = params[0].memref.buffer;
++    len = params[0].memref.size;
++
++    IMSG("[TA_AC] syscall_write buf addr: %p", buf);
++    res = Tee_PAC_Write((void *)buf, 64);
++    IMSG("[TA_AC] Syscall Tee_PAC_Write result: %d", res);
++
++    IMSG("[TA_AC] syscall_write exit");
++
++    return res;
++}
++
++TEE_Result syscall_read(uint32_t param_types,
++                        TEE_Param params[4])
++{
++    uint8_t *buf = NULL;
++    uint32_t len = 0;
++    TEE_Result res = TEE_SUCCESS;
++    uint32_t exp_param_types = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INOUT,
++                                               TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE,
++                                               TEE_PARAM_TYPE_NONE);
++
++    IMSG("\n\n\n[TA_AC] syscall_read has been called");
++
++    if (param_types != exp_param_types)
++        return TEE_ERROR_BAD_PARAMETERS;
++
++    buf = params[0].memref.buffer;
++    len = params[0].memref.size;
++
++    IMSG("[TA_AC] syscall_read buf addr: %p", buf);
++    res = Tee_PAC_Read(buf, len);
++    IMSG("[TA_AC] Syscall Tee_PAC_Read result: %d, content: %s", res, buf);
++
++    IMSG("[TA_AC] syscall_read exit");
++
++    return res;
++}
++
++static TEE_Result call_pac_pta()
++{
++    TEE_Result res = TEE_SUCCESS;
++
++    IMSG("\n\n\n[TA_AC] call_pac_pta has been called");
++
++    uint8_t data[64] = "PTA_PAC_PTA_PAC";
++    res = PAC_Write((void *)data, 64);
++    IMSG("[TA_AC] PTA call PAC_Write result: %d", res);
++
++    uint8_t *tmp = NULL;
++    tmp = malloc(65);
++
++    res = PAC_Read(tmp, 64);
++    IMSG("[TA_AC] PTA call PAC_Read result: %d, content: %s", res, tmp);
++    free(tmp);
++
++    IMSG("[TA_AC] call_pac_pta exit");
++
++    return res;
++}
++
++static TEE_Result call_pac_syscall()
++{
++    TEE_Result res = TEE_SUCCESS;
++
++    IMSG("\n\n\n[TA_AC] call_pac_syscall has been called");
++
++    res = Tee_PAC_Write((void *)"SYSCALL_PAC_SYSCALL_PAC", 64);
++    IMSG("[TA_AC] Syscall Tee_PAC_Write result: %d", res);
++
++    uint8_t *tmp = NULL;
++    tmp = malloc(65);
++
++    res = Tee_PAC_Read(tmp, 64);
++    IMSG("[TA_AC] Syscall Tee_PAC_Read result: %d, content: %s", res, tmp);
++
++    free(tmp);
++
++    IMSG("[TA_AC] call_pac_syscall exit");
++
++    return res;
++}
++
++TEE_Result TA_InvokeCommandEntryPoint(void __maybe_unused *sess_ctx,
++                                      uint32_t cmd_id,
++                                      uint32_t param_types, TEE_Param params[4])
++{
++    /* Unused parameter */
++    (void)&sess_ctx;
++
++    switch (cmd_id)
++    {
++    case TA_AC_CMD_TA_READ:
++        return ta_read(param_types, params);
++    case TA_AC_CMD_TA_WRITE:
++        return ta_write(param_types, params);
++    case TA_AC_CMD_PTA_READ:
++        return pta_read(param_types, params);
++    case TA_AC_CMD_PTA_WRITE:
++        return pta_write(param_types, params);
++    case TA_AC_CMD_SYSCALL_READ:
++        return syscall_read(param_types, params);
++    case TA_AC_CMD_SYSCALL_WRITE:
++        return syscall_write(param_types, params);
++    case TA_AC_CMD_INC_VALUE:
++        return inc_value(param_types, params);
++    case TA_AC_CMD_DEC_VALUE:
++        return dec_value(param_types, params);
++    case TA_AC_CMD_PAC_SYSCALL:
++        return call_pac_syscall();
++    case TA_AC_CMD_PAC_PTA:
++        return call_pac_pta();
++    default:
++        return TEE_ERROR_BAD_PARAMETERS;
++    }
++}
+diff --git a/ac/ta/include/ac_ta.h b/ac/ta/include/ac_ta.h
+new file mode 100644
+index 0000000..6753fa9
+--- /dev/null
++++ b/ac/ta/include/ac_ta.h
+@@ -0,0 +1,24 @@
++#ifndef TA_AC_H
++#define TA_AC_H
++
++#define TA_AC_UUID                                         \
++    {                                                      \
++        0x734a259d, 0x25ce, 0x44ce,                        \
++        {                                                  \
++            0x9c, 0xde, 0xc2, 0x28, 0x4c, 0xd0, 0x46, 0xb0 \
++        }                                                  \
++    }
++
++/* The function IDs implemented in this TA */
++#define TA_AC_CMD_TA_READ           0
++#define TA_AC_CMD_TA_WRITE          1
++#define TA_AC_CMD_PTA_READ          2
++#define TA_AC_CMD_PTA_WRITE         3
++#define TA_AC_CMD_SYSCALL_READ      4
++#define TA_AC_CMD_SYSCALL_WRITE     5
++#define TA_AC_CMD_INC_VALUE         6
++#define TA_AC_CMD_DEC_VALUE         7
++#define TA_AC_CMD_PAC_PTA           8
++#define TA_AC_CMD_PAC_SYSCALL       9
++
++#endif /*TA_AC_H*/
+diff --git a/ac/ta/sub.mk b/ac/ta/sub.mk
+new file mode 100644
+index 0000000..fd93471
+--- /dev/null
++++ b/ac/ta/sub.mk
+@@ -0,0 +1,5 @@
++global-incdirs-y += include
++srcs-y += ac_ta.c
++
++# To remove a certain compiler flag, add a line like this
++#cflags-template_ta.c-y += -Wno-strict-prototypes
+diff --git a/ac/ta/user_ta_header_defines.h b/ac/ta/user_ta_header_defines.h
+new file mode 100644
+index 0000000..33601ba
+--- /dev/null
++++ b/ac/ta/user_ta_header_defines.h
+@@ -0,0 +1,39 @@
++/*
++ * The name of this file must not be modified
++ */
++
++#ifndef USER_TA_HEADER_DEFINES_H
++#define USER_TA_HEADER_DEFINES_H
++
++/* To get the TA UUID definition */
++#include <ac_ta.h>
++
++#define TA_UUID				TA_AC_UUID
++
++/*
++ * TA properties: multi-instance TA, no specific attribute
++ * TA_FLAG_EXEC_DDR is meaningless but mandated.
++ */
++#define TA_FLAGS			TA_FLAG_EXEC_DDR
++
++/* Provisioned stack size */
++#define TA_STACK_SIZE			(2 * 1024)
++
++/* Provisioned heap size for TEE_Malloc() and friends */
++#define TA_DATA_SIZE			(32 * 1024)
++
++/* The gpd.ta.version property */
++#define TA_VERSION	"1.0"
++
++/* The gpd.ta.description property */
++#define TA_DESCRIPTION	"SOP-TEE Access Control Trusted Application"
++
++/* Extra properties */
++#define TA_CURRENT_TA_EXT_PROPERTIES \
++    { "org.linaro.optee.examples.ac.property1", \
++	USER_TA_PROP_TYPE_STRING, \
++        "Some string" }, \
++    { "org.linaro.optee.examples.ac.property2", \
++	USER_TA_PROP_TYPE_U32, &(const uint32_t){ 0x0010 } }
++
++#endif /* USER_TA_HEADER_DEFINES_H */

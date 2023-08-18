@@ -1,0 +1,340 @@
+diff --git a/arch/arm64/include/asm/pgtable-hwdef.h b/arch/arm64/include/asm/pgtable-hwdef.h
+index 40085e53f..449f9a463 100644
+--- a/arch/arm64/include/asm/pgtable-hwdef.h
++++ b/arch/arm64/include/asm/pgtable-hwdef.h
+@@ -155,6 +155,10 @@
+ #define PTE_PXN			(_AT(pteval_t, 1) << 53)	/* Privileged XN */
+ #define PTE_UXN			(_AT(pteval_t, 1) << 54)	/* User XN */
+ 
++// MOD(ZFL): Add PRN and PWN bits
++#define PTE_PRN                 (_AT(pteval_t, 1) << 48)        /* Privileged RN */
++#define PTE_PWN                 (_AT(pteval_t, 1) << 49)        /* Privileged WN */
++
+ #define PTE_ADDR_LOW		(((_AT(pteval_t, 1) << (48 - PAGE_SHIFT)) - 1) << PAGE_SHIFT)
+ #ifdef CONFIG_ARM64_PA_BITS_52
+ #define PTE_ADDR_HIGH		(_AT(pteval_t, 0xf) << 12)
+diff --git a/arch/arm64/include/asm/pgtable-prot.h b/arch/arm64/include/asm/pgtable-prot.h
+index 7032f04c8..95c08ecfa 100644
+--- a/arch/arm64/include/asm/pgtable-prot.h
++++ b/arch/arm64/include/asm/pgtable-prot.h
+@@ -80,18 +80,40 @@ extern bool arm64_use_ng_mappings;
+ 		__val;							\
+ 	 })
+ 
++//#define PAGE_NONE		__pgprot(((_PAGE_DEFAULT) & ~PTE_VALID) | PTE_PROT_NONE | PTE_RDONLY | PTE_NG | PTE_PXN | PTE_UXN)
++///* shared+writable pages are clean by default, hence PTE_RDONLY|PTE_WRITE */
++//#define PAGE_SHARED		__pgprot(_PAGE_DEFAULT | PTE_USER | PTE_RDONLY | PTE_NG | PTE_PXN | PTE_UXN | PTE_WRITE)
++//#define PAGE_SHARED_EXEC	__pgprot(_PAGE_DEFAULT | PTE_USER | PTE_RDONLY | PTE_NG | PTE_PXN | PTE_WRITE)
++//#define PAGE_READONLY		__pgprot(_PAGE_DEFAULT | PTE_USER | PTE_RDONLY | PTE_NG | PTE_PXN | PTE_UXN)
++//#define PAGE_READONLY_EXEC	__pgprot(_PAGE_DEFAULT | PTE_USER | PTE_RDONLY | PTE_NG | PTE_PXN)
++//#define PAGE_EXECONLY		__pgprot(_PAGE_DEFAULT | PTE_RDONLY | PTE_NG | PTE_PXN)
++//
++//#define __P000  PAGE_NONE
++//#define __P001  PAGE_READONLY
++//#define __P010  PAGE_READONLY
++//#define __P011  PAGE_READONLY
++//#define __P100  PAGE_EXECONLY
++//#define __P101  PAGE_READONLY_EXEC
++//#define __P110  PAGE_READONLY_EXEC
++//#define __P111  PAGE_READONLY_EXEC
++
++// MOD(ZFL): Update page access permissions with PTE_PRN and PTE_PWN
+ #define PAGE_NONE		__pgprot(((_PAGE_DEFAULT) & ~PTE_VALID) | PTE_PROT_NONE | PTE_RDONLY | PTE_NG | PTE_PXN | PTE_UXN)
+ /* shared+writable pages are clean by default, hence PTE_RDONLY|PTE_WRITE */
+ #define PAGE_SHARED		__pgprot(_PAGE_DEFAULT | PTE_USER | PTE_RDONLY | PTE_NG | PTE_PXN | PTE_UXN | PTE_WRITE)
+ #define PAGE_SHARED_EXEC	__pgprot(_PAGE_DEFAULT | PTE_USER | PTE_RDONLY | PTE_NG | PTE_PXN | PTE_WRITE)
+ #define PAGE_READONLY		__pgprot(_PAGE_DEFAULT | PTE_USER | PTE_RDONLY | PTE_NG | PTE_PXN | PTE_UXN)
++#define PAGE_RO			__pgprot(_PAGE_DEFAULT | PTE_USER | PTE_RDONLY | PTE_NG | PTE_PXN | PTE_UXN | PTE_PWN)
++#define PAGE_WO			__pgprot(_PAGE_DEFAULT | PTE_USER | PTE_NG | PTE_PXN | PTE_UXN | PTE_PRN)
++#define PAGE_RW			__pgprot(_PAGE_DEFAULT | PTE_USER | PTE_RDONLY | PTE_NG | PTE_PXN | PTE_UXN)
++#define PAGE_NRW		__pgprot(((_PAGE_DEFAULT) & ~PTE_VALID) | PTE_PROT_NONE | PTE_RDONLY | PTE_NG | PTE_PXN | PTE_UXN | PTE_PWN | PTE_PRN)
+ #define PAGE_READONLY_EXEC	__pgprot(_PAGE_DEFAULT | PTE_USER | PTE_RDONLY | PTE_NG | PTE_PXN)
+ #define PAGE_EXECONLY		__pgprot(_PAGE_DEFAULT | PTE_RDONLY | PTE_NG | PTE_PXN)
+ 
+-#define __P000  PAGE_NONE
+-#define __P001  PAGE_READONLY
+-#define __P010  PAGE_READONLY
+-#define __P011  PAGE_READONLY
++#define __P000  PAGE_NRW
++#define __P001  PAGE_RO
++#define __P010  PAGE_WO
++#define __P011  PAGE_RW
+ #define __P100  PAGE_EXECONLY
+ #define __P101  PAGE_READONLY_EXEC
+ #define __P110  PAGE_READONLY_EXEC
+@@ -106,6 +128,7 @@ extern bool arm64_use_ng_mappings;
+ #define __S110  PAGE_SHARED_EXEC
+ #define __S111  PAGE_SHARED_EXEC
+ 
++
+ #endif /* __ASSEMBLY__ */
+ 
+ #endif /* __ASM_PGTABLE_PROT_H */
+diff --git a/arch/arm64/include/asm/pgtable.h b/arch/arm64/include/asm/pgtable.h
+index c4ba047a8..28f08ff91 100644
+--- a/arch/arm64/include/asm/pgtable.h
++++ b/arch/arm64/include/asm/pgtable.h
+@@ -759,9 +759,10 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
+ 	 * Normal and Normal-Tagged are two different memory types and indices
+ 	 * in MAIR_EL1. The mask below has to include PTE_ATTRINDX_MASK.
+ 	 */
++	// MOD(ZFL): Add PTE_PRN and PTE_PWN bits
+ 	const pteval_t mask = PTE_USER | PTE_PXN | PTE_UXN | PTE_RDONLY |
+ 			      PTE_PROT_NONE | PTE_VALID | PTE_WRITE | PTE_GP |
+-			      PTE_ATTRINDX_MASK;
++			      PTE_ATTRINDX_MASK | PTE_PRN | PTE_PWN;
+ 	/* preserve the hardware dirty information */
+ 	if (pte_hw_dirty(pte))
+ 		pte = pte_mkdirty(pte);
+diff --git a/arch/arm64/mm/ptdump.c b/arch/arm64/mm/ptdump.c
+index 1c403536c..fdd75b25f 100644
+--- a/arch/arm64/mm/ptdump.c
++++ b/arch/arm64/mm/ptdump.c
+@@ -26,6 +26,8 @@
+ #include <asm/ptdump.h>
+ 
+ 
++
++
+ enum address_markers_idx {
+ 	PAGE_OFFSET_NR = 0,
+ 	PAGE_END_NR,
+@@ -115,6 +117,16 @@ static const struct prot_bits pte_bits[] = {
+ 		.set	= "NX",
+ 		.clear	= "x ",
+ 	}, {
++                .mask   = PTE_PRN,
++                .val    = PTE_PRN,
++                .set    = "PRN",
++                .clear  = "pr ",
++        }, {
++                .mask   = PTE_PWN,
++                .val    = PTE_PWN,
++                .set    = "PWN",
++                .clear  = "pw ",
++        }, {
+ 		.mask	= PTE_SHARED,
+ 		.val	= PTE_SHARED,
+ 		.set	= "SHD",
+@@ -309,6 +321,7 @@ static void note_page(struct ptdump_state *pt_st, unsigned long addr, int level,
+ 
+ void ptdump_walk(struct seq_file *s, struct ptdump_info *info)
+ {
++	struct mm_struct *mm = info->mm ?: current->mm;
+ 	unsigned long end = ~0UL;
+ 	struct pg_state st;
+ 
+@@ -328,7 +341,8 @@ void ptdump_walk(struct seq_file *s, struct ptdump_info *info)
+ 		}
+ 	};
+ 
+-	ptdump_walk_pgd(&st.ptdump, info->mm, NULL);
++	// ptdump_walk_pgd(&st.ptdump, info->mm, NULL);
++	ptdump_walk_pgd(&st.ptdump, mm, NULL);
+ }
+ 
+ static void __init ptdump_initialize(void)
+@@ -347,6 +361,17 @@ static struct ptdump_info kernel_ptdump_info = {
+ 	.base_addr	= PAGE_OFFSET,
+ };
+ 
++static struct addr_marker user_address_markers[] = {
++	{ 0,				"Userspace memory start" },
++	{ 0 /* TASK_SIZE_64 */,		"Userspace memory end" },
++	{ -1,				NULL },
++};
++
++static struct ptdump_info user_ptdump_info = {
++	.markers	= user_address_markers,
++};
++
++
+ void ptdump_check_wx(void)
+ {
+ 	struct pg_state st = {
+@@ -381,8 +406,10 @@ static int __init ptdump_init(void)
+ #if defined(CONFIG_KASAN_GENERIC) || defined(CONFIG_KASAN_SW_TAGS)
+ 	address_markers[KASAN_START_NR].start_address = KASAN_SHADOW_START;
+ #endif
++	user_address_markers[1].start_address = TASK_SIZE_64;
+ 	ptdump_initialize();
+ 	ptdump_debugfs_register(&kernel_ptdump_info, "kernel_page_tables");
++	ptdump_debugfs_register(&user_ptdump_info, "user_page_tables");
+ 	return 0;
+ }
+ device_initcall(ptdump_init);
+diff --git a/drivers/tee/optee/optee_msg.h b/drivers/tee/optee/optee_msg.h
+index 2422e185d..a573622bf 100644
+--- a/drivers/tee/optee/optee_msg.h
++++ b/drivers/tee/optee/optee_msg.h
+@@ -118,6 +118,9 @@ struct optee_msg_param_tmem {
+ 	u64 buf_ptr;
+ 	u64 size;
+ 	u64 shm_ref;
++	// MOD(yucy): add prot
++	u32 prot;
++	u32 prot_is_set;
+ };
+ 
+ /**
+diff --git a/drivers/tee/optee/smc_abi.c b/drivers/tee/optee/smc_abi.c
+index 23cbdeb98..165f496a7 100644
+--- a/drivers/tee/optee/smc_abi.c
++++ b/drivers/tee/optee/smc_abi.c
+@@ -422,6 +422,9 @@ static int optee_shm_register(struct tee_context *ctx, struct tee_shm *shm,
+ 				OPTEE_MSG_ATTR_NONCONTIG;
+ 	msg_arg->params->u.tmem.shm_ref = (unsigned long)shm;
+ 	msg_arg->params->u.tmem.size = tee_shm_get_size(shm);
++	// MOD(yucy): set shm prot and prot_is_set
++	msg_arg->params->u.tmem.prot = shm->prot;
++	msg_arg->params->u.tmem.prot_is_set = shm->prot_is_set;
+ 	/*
+ 	 * In the least bits of msg_arg->params->u.tmem.buf_ptr we
+ 	 * store buffer offset from 4k page, as described in OP-TEE ABI.
+diff --git a/drivers/tee/tee_core.c b/drivers/tee/tee_core.c
+index 2b37bc408..03b644733 100644
+--- a/drivers/tee/tee_core.c
++++ b/drivers/tee/tee_core.c
+@@ -330,7 +330,10 @@ tee_ioctl_shm_register(struct tee_context *ctx,
+ 	if (data.flags)
+ 		return -EINVAL;
+ 
+-	shm = tee_shm_register(ctx, data.addr, data.length,
++	// MOD(yucy): set shm prot and prot_is_set
++	//shm = tee_shm_register(ctx, data.addr, data.length,
++	//		       TEE_SHM_DMA_BUF | TEE_SHM_USER_MAPPED);
++	shm = tee_shm_register(ctx, data.addr, data.length, data.prot, data.prot_is_set,
+ 			       TEE_SHM_DMA_BUF | TEE_SHM_USER_MAPPED);
+ 	if (IS_ERR(shm))
+ 		return PTR_ERR(shm);
+diff --git a/drivers/tee/tee_shm.c b/drivers/tee/tee_shm.c
+index 499fccba3..437a5bf9f 100644
+--- a/drivers/tee/tee_shm.c
++++ b/drivers/tee/tee_shm.c
+@@ -146,7 +146,7 @@ struct tee_shm *tee_shm_alloc_kernel_buf(struct tee_context *ctx, size_t size)
+ EXPORT_SYMBOL_GPL(tee_shm_alloc_kernel_buf);
+ 
+ struct tee_shm *tee_shm_register(struct tee_context *ctx, unsigned long addr,
+-				 size_t length, u32 flags)
++				 size_t length, u32 prot, u32 prot_is_set, u32 flags)
+ {
+ 	struct tee_device *teedev = ctx->teedev;
+ 	const u32 req_user_flags = TEE_SHM_DMA_BUF | TEE_SHM_USER_MAPPED;
+@@ -231,6 +231,9 @@ struct tee_shm *tee_shm_register(struct tee_context *ctx, unsigned long addr,
+ 		goto err;
+ 	}
+ 
++	// MOD(yucy): set shm prot and prot_is_set
++	shm->prot = prot;
++	shm->prot_is_set = prot_is_set;
+ 	rc = teedev->desc->ops->shm_register(ctx, shm, shm->pages,
+ 					     shm->num_pages, start);
+ 	if (rc) {
+diff --git a/include/linux/tee_drv.h b/include/linux/tee_drv.h
+index cf5999626..5f3423681 100644
+--- a/include/linux/tee_drv.h
++++ b/include/linux/tee_drv.h
+@@ -218,6 +218,9 @@ struct tee_shm {
+ 	u32 flags;
+ 	int id;
+ 	u64 sec_world_id;
++	// MOD(yucy): add prot
++	uint32_t prot;
++	uint32_t prot_is_set;
+ };
+ 
+ /**
+@@ -349,8 +352,9 @@ struct tee_shm *tee_shm_alloc_kernel_buf(struct tee_context *ctx, size_t size);
+  *
+  * @returns a pointer to 'struct tee_shm'
+  */
++// MOD(yucy): add prot
+ struct tee_shm *tee_shm_register(struct tee_context *ctx, unsigned long addr,
+-				 size_t length, u32 flags);
++				 size_t length, u32 prot, u32 prot_is_set, u32 flags);
+ 
+ /**
+  * tee_shm_is_registered() - Check if shared memory object in registered in TEE
+diff --git a/include/uapi/linux/tee.h b/include/uapi/linux/tee.h
+index 25a6c534b..c6ce5b831 100644
+--- a/include/uapi/linux/tee.h
++++ b/include/uapi/linux/tee.h
+@@ -379,6 +379,9 @@ struct tee_ioctl_shm_register_data {
+ 	__u64 length;
+ 	__u32 flags;
+ 	__s32 id;
++	// MOD(yucy): add prot
++	__u32 prot;
++	__u32 prot_is_set;
+ };
+ 
+ /**
+diff --git a/mm/Kconfig.debug b/mm/Kconfig.debug
+index 1e7371780..668bcfdf3 100644
+--- a/mm/Kconfig.debug
++++ b/mm/Kconfig.debug
+@@ -132,12 +132,15 @@ config DEBUG_WX
+ 
+ config GENERIC_PTDUMP
+ 	bool
++	default y
+ 
+ config PTDUMP_CORE
+ 	bool
++	default y
+ 
+ config PTDUMP_DEBUGFS
+ 	bool "Export kernel pagetable layout to userspace via debugfs"
++	default y
+ 	depends on DEBUG_KERNEL
+ 	depends on DEBUG_FS
+ 	depends on GENERIC_PTDUMP
+diff --git a/security/keys/trusted-keys/trusted_tee.c b/security/keys/trusted-keys/trusted_tee.c
+index 2ce66c199..a322fef2e 100644
+--- a/security/keys/trusted-keys/trusted_tee.c
++++ b/security/keys/trusted-keys/trusted_tee.c
+@@ -71,7 +71,7 @@ static int trusted_tee_seal(struct trusted_key_payload *p, char *datablob)
+ 	memset(&param, 0, sizeof(param));
+ 
+ 	reg_shm_in = tee_shm_register(pvt_data.ctx, (unsigned long)p->key,
+-				      p->key_len, TEE_SHM_DMA_BUF |
++				      p->key_len, 3, 0, TEE_SHM_DMA_BUF |
+ 				      TEE_SHM_KERNEL_MAPPED);
+ 	if (IS_ERR(reg_shm_in)) {
+ 		dev_err(pvt_data.dev, "key shm register failed\n");
+@@ -79,7 +79,7 @@ static int trusted_tee_seal(struct trusted_key_payload *p, char *datablob)
+ 	}
+ 
+ 	reg_shm_out = tee_shm_register(pvt_data.ctx, (unsigned long)p->blob,
+-				       sizeof(p->blob), TEE_SHM_DMA_BUF |
++				       sizeof(p->blob), 3, 0, TEE_SHM_DMA_BUF |
+ 				       TEE_SHM_KERNEL_MAPPED);
+ 	if (IS_ERR(reg_shm_out)) {
+ 		dev_err(pvt_data.dev, "blob shm register failed\n");
+@@ -132,7 +132,7 @@ static int trusted_tee_unseal(struct trusted_key_payload *p, char *datablob)
+ 	memset(&param, 0, sizeof(param));
+ 
+ 	reg_shm_in = tee_shm_register(pvt_data.ctx, (unsigned long)p->blob,
+-				      p->blob_len, TEE_SHM_DMA_BUF |
++				      p->blob_len, 3, 0, TEE_SHM_DMA_BUF |
+ 				      TEE_SHM_KERNEL_MAPPED);
+ 	if (IS_ERR(reg_shm_in)) {
+ 		dev_err(pvt_data.dev, "blob shm register failed\n");
+@@ -140,7 +140,7 @@ static int trusted_tee_unseal(struct trusted_key_payload *p, char *datablob)
+ 	}
+ 
+ 	reg_shm_out = tee_shm_register(pvt_data.ctx, (unsigned long)p->key,
+-				       sizeof(p->key), TEE_SHM_DMA_BUF |
++				       sizeof(p->key), 3, 0, TEE_SHM_DMA_BUF |
+ 				       TEE_SHM_KERNEL_MAPPED);
+ 	if (IS_ERR(reg_shm_out)) {
+ 		dev_err(pvt_data.dev, "key shm register failed\n");
+@@ -192,7 +192,7 @@ static int trusted_tee_get_random(unsigned char *key, size_t key_len)
+ 	memset(&inv_arg, 0, sizeof(inv_arg));
+ 	memset(&param, 0, sizeof(param));
+ 
+-	reg_shm = tee_shm_register(pvt_data.ctx, (unsigned long)key, key_len,
++	reg_shm = tee_shm_register(pvt_data.ctx, (unsigned long)key, key_len, 3, 0,
+ 				   TEE_SHM_DMA_BUF | TEE_SHM_KERNEL_MAPPED);
+ 	if (IS_ERR(reg_shm)) {
+ 		dev_err(pvt_data.dev, "key shm register failed\n");
