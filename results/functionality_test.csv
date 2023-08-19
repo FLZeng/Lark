@@ -1,0 +1,18 @@
+﻿Attribute settings,,,,Trusted Kernel,,TA,
+URN,UWN,PRN,PXN,Readable,Writeable,Readable,Writeable
+1,1,1,1, ,,,
+0,1,1,1,Y,,,
+1,0,1,1,,Y,,
+1,1,0,1,,,Y,
+1,1,1,0,,,,Y
+0,0,1,1,Y,Y,,
+0,0,0,1,Y,Y,Y,
+0,0,1,0,Y,Y,,Y
+1,1,0,0,,,Y,Y
+0,1,0,0,Y,,Y,Y
+1,0,0,0,,Y,Y,Y
+0,1,0,1,Y,,Y,
+0,1,1,0,Y,,,Y
+1,0,1,0,,Y,,Y
+1,0,0,1,,Y,Y,
+0,0,0,0,Y,Y,Y,Y
