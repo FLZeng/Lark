@@ -174,6 +174,8 @@ buildroot login:
 # ./test_app/test_app
 ```
 
+注：在 patch 过的 OP-TEE 中使用 `test_driver.ko`，在 native OP-TEE 中使用 `test_driver_native.ko`。
+
 *test_app* 接受以下输入指令：
 
 - r/w: 在内核态读/写 buffer

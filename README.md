@@ -174,6 +174,8 @@ Run the test application:
 # ./test_app/test_app
 ```
 
+Note: Use `test_driver.ko` in patched OP-TEE and  `test_driver_native.ko` in native OP-TEE.
+
 *test_app* accepts the following input commands:
 
 - r/w: Read/write the buffer in the kernel mode
