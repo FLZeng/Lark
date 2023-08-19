@@ -1,8 +1,8 @@
 # Lark: Verified Cross-Domain Access Control for TEE
 
-## 1 Artifact Description
+## 1 说明
 
-The artifact of the *Lark paper* includes the Lark module, the source code of Lark prototype, and experimental data. The directory structure is as follows:
+Lark 论文的 artifact 包括 Lark module、Lark 原型源码以及实验数据。整体目录结构如下：
 
 ```
 |-- Lark
@@ -24,37 +24,37 @@ The artifact of the *Lark paper* includes the Lark module, the source code of La
     |-- results						# experimental results data
 ```
 
-## 2 Environment Setup
+## 2 环境设置
 
-The environment can be a physical or virtual machine in the following minimal configuration:
+运行环境可以是以下最小配置的物理机或虚拟机：
 
 - OS: Ubuntu 20.04 LTS with GUI
 - CPU: 4-core Intel® Core™ i7-10700 CPU @ 2.90GHz
 - RAM: 4GB
 - Disk: 30GB
 
-Notes:
+注意：
 
-- The GUI must be installed on the Ubuntu because OP-TEE starts xterm when it runs.
-- For faster compilation, we recommend a processor with 8 cores or more.
+- Ubuntu 系统必须安装图形界面，因为 OP-TEE 运行时要启动 xterm。
+- 为了加快编译速度，我们推荐8核以上的处理器。
 
-### 2.1 Pre-configured VM image
+### 2.1 预配置的 VM 镜像
 
-A configured VM image is provided and can be downloaded from: https://zjueducn-my.sharepoint.com/personal/flzeng_zju_edu_cn/Documents/Lark/Ubuntu_Lark.vmdk
+预配置好的虚拟机镜像，可以从以下连接下载：https://zjueducn-my.sharepoint.com/personal/flzeng_zju_edu_cn/Documents/Lark/Ubuntu_Lark.vmdk
 
-Create a VM in VMWare Workstation that meets the minimum configuration requirements and use the provided image as the disk for the VM. The username for the VM is `root` and password is `123456`.
+在 VMWare Workstation 中创建一个满足最小配置要求的虚拟机，并使用提供的镜像作为虚拟机的磁盘。虚拟机的用户名：`root`，密码：`123456`。
 
-This README file exists on the desktop of the `root` user of the VM.
+这份 README 文件存在于 VM 的 `root` 用户的桌面上。
 
 ## 3 Getting Started
 
-You can start from scratch or use the VM image we provide.
+可以从头开始或使用我们提供的 VM 镜像。
 
-If you are using the provided VM image, the first 6 steps below are not required and you can skip to the **compile and run** step.
+如果使用提供的 VM 镜像，以下前 6 个步骤不需要执行，直接跳到**编译与运行**步骤。
 
-The following commands can be executed in the ssh text interface, but remember to log into the GUI with the same user first.
+可以在 ssh 文本界面中执行下面的命令，但记得要先使用相同的用户登录图形界面。
 
-### 3.1 Install dependency packages
+### 3.1 安装依赖包
 
 ```
 # apt-get install android-tools-adb android-tools-fastboot autoconf \
@@ -68,7 +68,7 @@ The following commands can be executed in the ssh text interface, but remember t
         rsync unzip uuid-dev xdg-utils xterm xz-utils zlib1g-dev
 ```
 
-### 3.2 Clone Lark
+### 3.2 克隆 Lark
 
 ```
 # export LARK_DIR="/data/Lark"
@@ -76,7 +76,7 @@ The following commands can be executed in the ssh text interface, but remember t
 # git clone https://github.com/FLZeng/Lark.git ${LARK_DIR}
 ```
 
-### 3.3 Sync OP-TEE source code
+### 3.3 同步 OP-TEE 源码
 
 ```
 # cd ${LARK_DIR}/Lark_prototype
@@ -85,34 +85,34 @@ The following commands can be executed in the ssh text interface, but remember t
 # repo sync
 ```
 
-### 3.4 Download toolchains
+### 3.4 下载 toolchains
 
 ```
 # cd ${LARK_DIR}/Lark_prototype/build
 # make toolchains
 ```
 
-### 3.5 Apply Lark pathes
+### 3.5 应用 Lark 补丁
 
 ```
 # cd ${LARK_DIR}/Lark_prototype
 # sh patches/apply_patches.sh
 ```
 
-If you are using Ubuntu 22.04 LTS or newer release, an additional patch related to brotli is required:
+如果你使用的是 Ubuntu 22.04 LTS 及以上的版本，还需要额外打一个与 brotli 相关的补丁：
 
 ```
 # cd ${LARK_DIR}/Lark_prototype/edk2
 # git apply ${LARK_DIR}/Lark_prototype/patches/edk2.diff
 ```
 
-### 3.6 Download ubuntu-focal rootfs
+### 3.6 下载 ubuntu-focal 根文件系统
 
-A ubuntu-focal root filesystem with pre-installed evaluation applications is available for download: https://zjueducn-my.sharepoint.com/personal/flzeng_zju_edu_cn/Documents/Lark/ubuntu-focal-arm64-root.tar.xz
+我们提供了一个预装了性能评估应用程序的 ubuntu-focal 根文件系统，下载地址：https://zjueducn-my.sharepoint.com/personal/flzeng_zju_edu_cn/Documents/Lark/ubuntu-focal-arm64-root.tar.xz
 
-Note that this is for the normal world OS, and is different from the VM image mentioned above.
+请注意，这是给 normal world OS 使用的，不同于前面提到的 VM 镜像。
 
-Unpack it to the `sharefs` directory:
+将它解压到 `sharefs` 目录下：
 
 ```
 # tar xf ubuntu-focal-arm64-root.tar.xz -C ${LARK_DIR}/sharefs
@@ -120,16 +120,16 @@ Unpack it to the `sharefs` directory:
 
 
 
-The steps below are the same for both using the VM image and from scratch.
+从以下步骤开始，对于使用 VM 镜像和 from scratch 方法都是一样的。
 
-### 3.7 Compile and run
+### 3.7 编译与运行
 
 ```
 # export LARK_DIR="/data/Lark"
 # make run QEMU_VIRTFS_ENABLE=y QEMU_VIRTFS_HOST_DIR=${LARK_DIR}/sharefs/ -j $(nproc)
 ```
 
-Once the compilation is complete, a QEMU VM will be launched to run OP-TEE. When you see the following message, type a `c` and `enter`:
+编译完成后，会启动一个 QEMU 虚拟机运行 OP-TEE，当你看到以下信息时，键入一个 `c` 和 `回车`：
 
 ```
 cd /data/Lark/Lark_prototype/build/../out/bin && /data/Lark/Lark_prototype/build/../qemu/build/aarch64-softmmu/qemu-system-aarch64 \
@@ -150,38 +150,38 @@ QEMU 6.0.0 monitor - type 'help' for more information
 (qemu)
 ```
 
-Then in the GUI, you can see that two xterms are launched, one for normal world and the other for secure world.
+然后在图形界面中，可以看到启动了两个 xterm，一个是 normal world，另一个是 secure world。
 
-When the following prompt appears in the normal world terminal, enter root to log in without a password:
+当 normal world terminal 出现以下提示信息时，输入 root 登录，不需要密码：
 
 ```
 Welcome to Buildroot, type root or test to login
 buildroot login:
 ```
 
-### 3.8 Examine basic functionality
+### 3.8 检查基本功能
 
-Execute the following command in normal world terminal to mount sharefs:
+在 normal world terminal 中执行以下命令挂载 sharefs：
 
 ```
 # mkdir sharefs && mount -t 9p -o trans=virtio host sharefs && cd sharefs && ls -l
 ```
 
-Run the test application:
+运行测试应用程序：
 
 ```
 # insmod test_app/test_driver.ko
 # ./test_app/test_app
 ```
 
-*test_app* accepts the following input commands:
+*test_app* 接受以下输入指令：
 
-- r/w: Read/write the buffer in the kernel mode
-- ro/wo/rw/rwn: Set the buffer as kernel read-only/write-only/read-write/inaccessible
-- t: Run micro-benchmark tests
-- q: Exit the test application
+- r/w: 在内核态读/写 buffer
+- ro/wo/rw/rwn: 将 buffer 设为内核只读/只写/可读写/不可读写
+- t: 执行 micro-benchmark 测试
+- q: 退出测试程序
 
-Enter the following commands `r`, `w`, `wo`, `r` in sequence, and you can see that the kernel can no longer read the buffer when it is set to write-only:
+依次输入以下指令 `r`、`w`、`wo`、`r`，可以看到，当 buffer 被设为只写后，内核无法再读取 buffer：
 
 ```
 # ./test_app/test_app
@@ -203,23 +203,23 @@ waiting for cmd [r/w/ro/wo/rw/rwn/t/q]: r
 [  178.291834] Unable to handle kernel access to user memory outside uaccess routines at virtual address 0000ffff83aae000
 ```
 
-You can also chroot to the ubuntu-focal distribution to run pre-installed real-world applications:
+还可以 chroot 到 ubuntu-focal 发行版运行预安装的 real-world 应用：
 
 ```
 # ./chroot_ubuntu.sh
 ```
 
-The detailed evaluation experiments are described in the next section.
+详细的评估实验见下一节。
 
-## 4 Reproducibility Instructions
+## 4 性能评估
 
-The evaluation experiments include micro-benchmark, xtest, TAs, and real-world applications. The following commands are all executed in the normal world terminal.
+评估实验包括 micro-benchmark、xtest suite、TAs 和 real-world applications。以下命令都在 normal world terminal 中执行。
 
-The [`results/`](results/) directory contains all the experimental results data.
+在 [`results/`](results/) 目录中包含了所有实验结果数据。
 
 ### 4.1 Micro-benchmarks
 
-Run *test_app* and enter the `t` command to test the time to perform 10,000 read/write operations respectively:
+运行 *test_app*，输入 `t` 命令，测试分别执行 10,000 次读/写操作的时间：
 
 ```
 # ./test_app/test_app
@@ -238,9 +238,9 @@ test rounds: 10000, time = 0.402743s
 
 ### 4.2 xtest suite
 
-The execution time of the following test cases was tested: Basic OS features, TEE Internal client API, TEE Internal API, Global platform TEEC, Storage, Key derivation, and mbedTLS.
+测试以下测试用例的运行时间：Basic OS features、 TEE Internal client API、TEE Internal API、Global platform TEEC、Storage、Key derivation、mbedTLS。
 
-All tests take `real time (s)` in the results.
+所有测试取结果中的 `real time (s)`。
 
 **Basic OS features**
 
@@ -286,7 +286,7 @@ All tests take `real time (s)` in the results.
 
 ### 4.3 TAs
 
-The performance of **SHA256**, **AES-256**, and **Secure Storage** are tested under different buffer sizes. For all TAs, the values of `buffer size` are: 256, 512, 1024, 2048, 4096, 16384, 524288, 1048576 in Byte.
+测试 **SHA256**、AES-256、和 **Secure Storage** 在不同 buffer size下的性能。对于所有 TA，`buffer size` 的取值为：256、512、1024、2048、4096、16384、524288、1048576，单位为Byte。
 
 **SHA256**
 
@@ -294,7 +294,7 @@ The performance of **SHA256**, **AES-256**, and **Secure Storage** are tested un
 # xtest --sha-perf -n 1000 -a SHA256 -s BUFFER_SIZE
 ```
 
-Take the `mean time (μs)` in the result.
+取结果中的 `mean time (μs)`。
 
 **AES-256**
 
@@ -302,7 +302,7 @@ Take the `mean time (μs)` in the result.
 # xtest --aes-perf -n 1000 -k 256 -s BUFFER_SIZE
 ```
 
-Take the `mean time (μs)` in the result.
+取结果中的 `mean time (μs)`。
 
 **Secure Storage**
 
@@ -310,11 +310,11 @@ Take the `mean time (μs)` in the result.
 # xtest -t benchmark 1001 1002
 ```
 
-Take the `Speed (kB/s)` in the result.
+取结果中的 Speed (kB/s)。
 
 ### 4.4 Real-world applications
 
-Before running the application tests, mount sharefs and chroot to ubuntu-focal in the normal world terminal:
+在执行应用程序测试前，先在 normal world terminal 挂载 sharefs 并 chroot 到 ubuntu-focal：
 
 ```
 # mkdir sharefs && mount -t 9p -o trans=virtio host sharefs && cd sharefs && ls -l
@@ -329,7 +329,7 @@ Before running the application tests, mount sharefs and chroot to ubuntu-focal i
 # mcperf --conn-rate=1000 --call-rate=1000 --num-calls=10 --num-conns=1000 --sizes=d4096 --method=set
 ```
 
-Take the ` Response rate (rsp/s)` in the result.
+取结果中的 `Response rate (rsp/s)`。
 
 **Redis**
 
@@ -338,7 +338,7 @@ Take the ` Response rate (rsp/s)` in the result.
 # redis-benchmark -n 10000 -P 16 -c 100 -d 4096 -t set,get -q
 ```
 
-Take the `Requests per second` in the result.
+取结果中的 `Requests per second`。
 
 **sysbench**
 
@@ -347,7 +347,7 @@ Take the `Requests per second` in the result.
 # sysbench --test=memory --memory-block-size=4096K --memory-total-size=100G --memory-access-mode=rnd --num-threads=2 --memory-oper=write run
 ```
 
-Take the `Throughput (MiB/sec)` in the results.
+取结果中的 `Throughput (MiB/sec)`。
 
 **MBW**
 
@@ -355,7 +355,7 @@ Take the `Throughput (MiB/sec)` in the results.
 # mbw -q -n 10 128
 ```
 
-Take the `AVG bandwidth (MiB/s)` for each of the **MEMCPY**, **DUMB**, and **MCBLOCK** operations in the result.
+取结果中  **MEMCPY**、**DUMB**、**MCBLOCK** 每个操作的 `AVG bandwidth (MiB/s)`。
 
 **Bandwidth**
 
@@ -363,7 +363,7 @@ Take the `AVG bandwidth (MiB/s)` for each of the **MEMCPY**, **DUMB**, and **MCB
 # bandwidth64 --faster
 ```
 
-Take the `bandwidth (MB/s)` of **sequential read (64-bit)**, **sequential write (64-bit)**, and **random read (64-bit)** for `size=128 MB` in the result.
+取结果中 `size=128 MB` 时的 **sequential read (64-bit)**、**sequential write (64-bit)**、和 **random read (64-bit)** 的 `bandwidth (MB/s)`。
 
 **STREAM**
 
@@ -371,4 +371,4 @@ Take the `bandwidth (MB/s)` of **sequential read (64-bit)**, **sequential write 
 # stream
 ```
 
-Take the `Best Rate (MB/s)` of each operation of **Copy**, **Scale**, **Add** and **Triad** in the result.
+取结果中 **Copy**、**Scale**、**Add**、**Triad** 每个操作的 `Best Rate (MB/s)`。
