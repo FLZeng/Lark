@@ -286,7 +286,7 @@ All tests take `real time (s)` in the results.
 
 ### 4.3 TAs
 
-The performance of **SHA256**, **AES-256**, and **Secure Storage** are tested under different buffer sizes. For all TAs, the values of `buffer size` are: 256, 512, 1024, 2048, 4096, 16384, 524288, 1048576 in Byte.
+The performance of **SHA256**, **AES-256**, and **Secure Storage** are tested under different buffer sizes. For all TAs, the values of `buffer size` are: 256, 512, 1024, 2048, 4096, 8192, and 16384 in Byte.
 
 **SHA256**
 

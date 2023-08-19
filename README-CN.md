@@ -286,7 +286,7 @@ test rounds: 10000, time = 0.402743s
 
 ### 4.3 TAs
 
-测试 **SHA256**、AES-256、和 **Secure Storage** 在不同 buffer size下的性能。对于所有 TA，`buffer size` 的取值为：256、512、1024、2048、4096、16384、524288、1048576，单位为Byte。
+测试 **SHA256**、AES-256、和 **Secure Storage** 在不同 buffer size下的性能。对于所有 TA，`buffer size` 的取值为：256、512、1024、2048、4096、8192、16384，单位为Byte。
 
 **SHA256**
 
