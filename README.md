@@ -99,7 +99,7 @@ The following commands can be executed in the ssh text interface, but remember t
 # sh patches/apply_patches.sh
 ```
 
-If you are using Ubuntu 22.04 LTS or newer release, an additional patch related to brotli is required:
+If you are using **Ubuntu 22.04 LTS or newer release**, an additional patch related to brotli is required:
 
 ```
 # cd ${LARK_DIR}/Lark_prototype/edk2
@@ -126,6 +126,7 @@ The steps below are the same for both using the VM image and from scratch.
 
 ```
 # export LARK_DIR="/data/Lark"
+# cd ${LARK_DIR}/Lark_prototype/build
 # make run QEMU_VIRTFS_ENABLE=y QEMU_VIRTFS_HOST_DIR=${LARK_DIR}/sharefs/ -j $(nproc)
 ```
 

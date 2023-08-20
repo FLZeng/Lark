@@ -99,7 +99,7 @@ Lark 论文的 artifact 包括 Lark module、Lark 原型源码以及实验数据
 # sh patches/apply_patches.sh
 ```
 
-如果你使用的是 Ubuntu 22.04 LTS 及以上的版本，还需要额外打一个与 brotli 相关的补丁：
+如果你使用的是 **Ubuntu 22.04 LTS 及以上的版本**，还需要额外打一个与 brotli 相关的补丁：
 
 ```
 # cd ${LARK_DIR}/Lark_prototype/edk2
@@ -126,6 +126,7 @@ Lark 论文的 artifact 包括 Lark module、Lark 原型源码以及实验数据
 
 ```
 # export LARK_DIR="/data/Lark"
+# cd ${LARK_DIR}/Lark_prototype/build
 # make run QEMU_VIRTFS_ENABLE=y QEMU_VIRTFS_HOST_DIR=${LARK_DIR}/sharefs/ -j $(nproc)
 ```
 
