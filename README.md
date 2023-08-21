@@ -40,7 +40,7 @@ Notes:
 
 ### 2.1 Pre-configured VM image
 
-A configured VM image is provided and can be downloaded from: https://zjueducn-my.sharepoint.com/personal/flzeng_zju_edu_cn/Documents/Lark/Ubuntu_Lark.vmdk
+A configured VM image is provided and can be downloaded from: https://zenodo.org/record/8265887/files/Ubuntu_Lark.vmdk
 
 Create a VM in VMWare Workstation that meets the minimum configuration requirements and use the provided image as the disk for the VM. The username for the VM is `root` and password is `123456`.
 
@@ -108,7 +108,7 @@ If you are using **Ubuntu 22.04 LTS or newer release**, an additional patch rela
 
 ### 3.6 Download ubuntu-focal rootfs
 
-A ubuntu-focal root filesystem with pre-installed evaluation applications is available for download: https://zjueducn-my.sharepoint.com/personal/flzeng_zju_edu_cn/Documents/Lark/ubuntu-focal-arm64-root.tar.xz
+A ubuntu-focal root filesystem with pre-installed evaluation applications is available for download: https://zenodo.org/record/8265887/files/ubuntu-focal-arm64-root.tar.xz
 
 Note that this is for the normal world OS, and is different from the VM image mentioned above.
 

@@ -40,7 +40,7 @@ Lark 论文的 artifact 包括 Lark module、Lark 原型源码以及实验数据
 
 ### 2.1 预配置的 VM 镜像
 
-预配置好的虚拟机镜像，可以从以下连接下载：https://zjueducn-my.sharepoint.com/personal/flzeng_zju_edu_cn/Documents/Lark/Ubuntu_Lark.vmdk
+预配置好的虚拟机镜像，可以从以下连接下载：https://zenodo.org/record/8265887/files/Ubuntu_Lark.vmdk
 
 在 VMWare Workstation 中创建一个满足最小配置要求的虚拟机，并使用提供的镜像作为虚拟机的磁盘。虚拟机的用户名：`root`，密码：`123456`。
 
@@ -108,7 +108,7 @@ Lark 论文的 artifact 包括 Lark module、Lark 原型源码以及实验数据
 
 ### 3.6 下载 ubuntu-focal 根文件系统
 
-我们提供了一个预装了性能评估应用程序的 ubuntu-focal 根文件系统，下载地址：https://zjueducn-my.sharepoint.com/personal/flzeng_zju_edu_cn/Documents/Lark/ubuntu-focal-arm64-root.tar.xz
+我们提供了一个预装了性能评估应用程序的 ubuntu-focal 根文件系统，下载地址：https://zenodo.org/record/8265887/files/ubuntu-focal-arm64-root.tar.xz
 
 请注意，这是给 normal world OS 使用的，不同于前面提到的 VM 镜像。
 
