@@ -375,3 +375,16 @@ Take the `bandwidth (MB/s)` of **sequential read (64-bit)**, **sequential write 
 ```
 
 Take the `Best Rate (MB/s)` of each operation of **Copy**, **Scale**, **Add** and **Triad** in the result.
+
+### 4.5 Normalization
+
+For each test, obtain the results in native OP-TEE (`a`) and OP-TEE with Lark (`b`) separately, and then take `b/a` as the normalized value.
+
+Execute the following commands to restore the native OP-TEE environment:
+
+```
+# cd ${LARK_DIR}/Lark_prototype
+# sh patches/revert_patches.sh
+```
+
+Then redo the **compile and run** and subsequent steps.

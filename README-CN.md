@@ -375,3 +375,17 @@ test rounds: 10000, time = 0.402743s
 ```
 
 取结果中 **Copy**、**Scale**、**Add**、**Triad** 每个操作的 `Best Rate (MB/s)`。
+
+### 4.5 标准化
+
+计算标准化的结果：对于上述每一项测试，分别在原生 OP-TEE 和 patch 过的 OP-TEE 中获得测量结果 `a` 和 `b`，将 `b/a` 就是标准化的值，代表 Lark 相对于原生 OP-TEE 的性能。
+
+执行下面的脚本恢复原生 OP-TEE 环境：
+
+```
+# cd ${LARK_DIR}/Lark_prototype
+# sh patches/revert_patches.sh
+```
+
+然后重新执行**编译与运行**以及之后的步骤。
+
